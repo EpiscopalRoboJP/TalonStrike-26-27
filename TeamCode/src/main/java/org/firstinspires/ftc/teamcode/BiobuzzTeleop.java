@@ -15,12 +15,16 @@ public class BiobuzzTeleop extends LinearOpMode {
     private DcMotor backLeftMotor;
     private DcMotor backRightMotor;
     private CRServo intake;
+    private CRServo sweepL;
+    private CRServo sweepR;
 
     private double frontLeftPower;
     private double frontRightPower;
     private double backLeftPower;
     private double backRightPower;
     private double intakePower;
+    private double sweepLPower;
+    private double sweepRPower;
     private double drive;
     private double strafe;
     private double turn;
@@ -52,6 +56,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         backLeftMotor = hardwareMap.get(DcMotor.class, "BL");
         backRightMotor = hardwareMap.get(DcMotor.class, "BR");
         intake = hardwareMap.get(CRServo.class, "Intake");
+        sweepL = hardwareMap.get(CRServo.class, "sweepL");
+        sweepR = hardwareMap.get(CRServo.class, "sweepR");
 
         frontLeftMotor.setDirection(DcMotor.Direction.REVERSE);
         backLeftMotor.setDirection(DcMotor.Direction.REVERSE);
@@ -82,6 +88,19 @@ public class BiobuzzTeleop extends LinearOpMode {
             intakePower = -1.0;
         } else {
             intakePower = 0;
+        }
+
+        if (gamepad1.left_bumper) {
+            sweepLPower = 1.0;
+        }
+        else {
+            sweepLPower = 0;
+        }
+        if (gamepad1.right_bumper) {
+            sweepRPower = 1.0;
+        }
+        else {
+            sweepRPower = 0;
         }
     }
 
@@ -117,6 +136,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         backLeftMotor.setPower(backLeftPower);
         backRightMotor.setPower(backRightPower);
         intake.setPower(intakePower);
+        sweepL.setPower(sweepLPower);
+        sweepR.setPower(sweepRPower);
     }
 
     private void stopActuators() {
@@ -125,6 +146,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         backLeftMotor.setPower(0);
         backRightMotor.setPower(0);
         intake.setPower(0);
+        sweepL.setPower(0);
+        sweepR.setPower(0);
     }
 
     private void updateTelemetry() {
@@ -132,6 +155,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addData("Strafe", "%.2f", strafe);
         telemetry.addData("Turn", "%.2f", turn);
         telemetry.addData("Intake", "%.2f", intakePower);
+        telemetry.addData("Sweep Right", "%.2f", sweepRPower);
+        telemetry.addData("Sweep Left", "%.2f", sweepLPower);
         telemetry.update();
     }
 }
