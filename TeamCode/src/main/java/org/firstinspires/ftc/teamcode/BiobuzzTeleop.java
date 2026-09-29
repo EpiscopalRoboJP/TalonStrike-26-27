@@ -4,6 +4,7 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.Servo;
 
 /**
  * Teleop for GoBilda mecanum drive with a continuous-rotation intake.
@@ -15,19 +16,25 @@ public class BiobuzzTeleop extends LinearOpMode {
     private DcMotor backLeftMotor;
     private DcMotor backRightMotor;
     private CRServo intake;
-    private CRServo sweepL;
-    private CRServo sweepR;
+    private DcMotor laucher;
+    private Servo ramp;
+    private CRServo javelin;
 
     private double frontLeftPower;
     private double frontRightPower;
     private double backLeftPower;
     private double backRightPower;
     private double intakePower;
-    private double sweepLPower;
-    private double sweepRPower;
+    private double laucherPower;
+    private double javelinPower;
     private double drive;
     private double strafe;
     private double turn;
+
+    private boolean rampPosition;
+    private boolean prevJavelinButton;
+    // 0 forward, 1 stop, 2 reverse, 3 stop. Starts stopped so the first B press runs forward.
+    private int javelinState = 3;
 
     private static final double JOYSTICK_DEADZONE = 0.05;
 
@@ -44,6 +51,7 @@ public class BiobuzzTeleop extends LinearOpMode {
             getGamepadInputs();
             calculateMecanumDrive();
             setMotorPowers();
+            updateServoPositions();
             updateTelemetry();
         }
 
@@ -56,8 +64,9 @@ public class BiobuzzTeleop extends LinearOpMode {
         backLeftMotor = hardwareMap.get(DcMotor.class, "BL");
         backRightMotor = hardwareMap.get(DcMotor.class, "BR");
         intake = hardwareMap.get(CRServo.class, "Intake");
-        sweepL = hardwareMap.get(CRServo.class, "sweepL");
-        sweepR = hardwareMap.get(CRServo.class, "sweepR");
+        laucher = hardwareMap.get(DcMotor.class, "Laucher");
+        ramp = hardwareMap.get(Servo.class, "Ramp");
+        javelin = hardwareMap.get(CRServo.class, "Javelin");
 
         frontLeftMotor.setDirection(DcMotor.Direction.REVERSE);
         backLeftMotor.setDirection(DcMotor.Direction.REVERSE);
@@ -74,6 +83,10 @@ public class BiobuzzTeleop extends LinearOpMode {
         backLeftMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         backRightMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
+        laucher.setDirection(DcMotor.Direction.FORWARD);
+        laucher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        laucher.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+
         stopActuators();
     }
 
@@ -82,25 +95,22 @@ public class BiobuzzTeleop extends LinearOpMode {
         strafe = applyJoystickCurve(gamepad1.left_stick_x);
         turn = applyJoystickCurve(gamepad1.right_stick_x);
 
-        if (gamepad1.dpad_up) {
-            intakePower = 1.0;
-        } else if (gamepad1.dpad_down) {
-            intakePower = -1.0;
-        } else {
-            intakePower = 0;
-        }
+        laucherPower = applyJoystickCurve(gamepad2.right_stick_y);
+        intakePower = applyJoystickCurve(gamepad2.left_stick_y);
 
-        if (gamepad1.left_bumper) {
-            sweepLPower = 1.0;
+        rampPosition = gamepad2.a;
+
+        if (gamepad2.b && !prevJavelinButton) {
+            javelinState = (javelinState + 1) % 4;
         }
-        else {
-            sweepLPower = 0;
-        }
-        if (gamepad1.right_bumper) {
-            sweepRPower = 1.0;
-        }
-        else {
-            sweepRPower = 0;
+        prevJavelinButton = gamepad2.b;
+
+        if (javelinState == 0) {
+            javelinPower = 1.0;
+        } else if (javelinState == 2) {
+            javelinPower = -1.0;
+        } else {
+            javelinPower = 0.0;
         }
     }
 
@@ -136,8 +146,12 @@ public class BiobuzzTeleop extends LinearOpMode {
         backLeftMotor.setPower(backLeftPower);
         backRightMotor.setPower(backRightPower);
         intake.setPower(intakePower);
-        sweepL.setPower(sweepLPower);
-        sweepR.setPower(sweepRPower);
+        laucher.setPower(laucherPower);
+    }
+
+    private void updateServoPositions() {
+        ramp.setPosition(rampPosition ? 1.0 : 0.0);
+        javelin.setPower(javelinPower);
     }
 
     private void stopActuators() {
@@ -146,8 +160,10 @@ public class BiobuzzTeleop extends LinearOpMode {
         backLeftMotor.setPower(0);
         backRightMotor.setPower(0);
         intake.setPower(0);
-        sweepL.setPower(0);
-        sweepR.setPower(0);
+        laucher.setPower(0);
+        javelinState = 3;
+        javelinPower = 0.0;
+        javelin.setPower(0);
     }
 
     private void updateTelemetry() {
@@ -155,8 +171,17 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addData("Strafe", "%.2f", strafe);
         telemetry.addData("Turn", "%.2f", turn);
         telemetry.addData("Intake", "%.2f", intakePower);
-        telemetry.addData("Sweep Right", "%.2f", sweepRPower);
-        telemetry.addData("Sweep Left", "%.2f", sweepLPower);
+        telemetry.addData("Laucher", "%.2f", laucherPower);
+        telemetry.addData("Ramp", "%.2f", rampPosition);
+        telemetry.addData("Javelin", "Power: %.2f  State: %d", javelinPower, javelinState);
+   
+        telemetry.addLine("Controls");
+        telemetry.addLine("GP1 left stick: drive / strafe");
+        telemetry.addLine("GP1 right stick: turn");
+        telemetry.addLine("GP2 left stick: intake");
+        telemetry.addLine("GP2 right stick: launcher");
+        telemetry.addLine("GP2 A: ramp up while held");
+        telemetry.addLine("GP2 B: javelin forward, stop, reverse, stop");
         telemetry.update();
     }
 }
