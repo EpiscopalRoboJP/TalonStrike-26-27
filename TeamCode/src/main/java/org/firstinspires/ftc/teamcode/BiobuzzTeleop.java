@@ -43,7 +43,7 @@ public class BiobuzzTeleop extends LinearOpMode {
     private static final double RAMP_RANGE_DEGREES = 300.0;
     private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
-    private static final double JAVELIN_RUN_SECONDS = 9.0;
+    private static final double JAVELIN_RUN_SECONDS = 8.0;
     private static final double JAVELIN_POWER = 1.0;
 
     @Override
@@ -139,10 +139,10 @@ public class BiobuzzTeleop extends LinearOpMode {
     }
 
     private void calculateMecanumDrive() {
-        frontLeftPower = drive + strafe + turn;
-        frontRightPower = drive - strafe - turn;
-        backLeftPower = drive - strafe + turn;
-        backRightPower = drive + strafe - turn;
+        frontLeftPower = drive - strafe + turn;
+        frontRightPower = drive + strafe - turn;
+        backLeftPower = drive + strafe + turn;
+        backRightPower = drive - strafe - turn;
 
         double maxPower = Math.max(Math.abs(frontLeftPower), Math.abs(frontRightPower));
         maxPower = Math.max(maxPower, Math.abs(backLeftPower));
