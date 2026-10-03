@@ -27,3 +27,51 @@ android {
 dependencies {
     implementation project(':FtcRobotController')
 }
+
+// Wireless upload to a REV Control Hub. The hub serves ADB on port 5555 while
+// this computer is joined to the hub's Wi-Fi network.
+def controlHubHost = findProperty('controlHubHost') ?: '192.168.43.1:5555'
+
+def resolveAdb = {
+    def sdkDir = null
+    def localPropsFile = rootProject.file('local.properties')
+    if (localPropsFile.exists()) {
+        def props = new Properties()
+        localPropsFile.withInputStream { props.load(it) }
+        sdkDir = props.getProperty('sdk.dir')
+    }
+    if (sdkDir == null || sdkDir.trim().isEmpty()) {
+        sdkDir = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT')
+    }
+    if (sdkDir == null || sdkDir.trim().isEmpty()) {
+        throw new GradleException('Android SDK not found. Set sdk.dir in local.properties.')
+    }
+    def adbName = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows') ? 'adb.exe' : 'adb'
+    def adb = new File(sdkDir, "platform-tools/${adbName}")
+    if (!adb.isFile()) {
+        throw new GradleException("adb not found at ${adb.absolutePath}")
+    }
+    return adb.absolutePath
+}
+
+tasks.register('connectControlHub') {
+    group = 'install'
+    description = "Connect ADB to the REV Control Hub at ${controlHubHost}."
+    doLast {
+        exec {
+            commandLine resolveAdb(), 'connect', controlHubHost
+        }
+    }
+}
+
+tasks.register('wifiInstall') {
+    group = 'install'
+    description = 'Connect to the Control Hub over Wi-Fi and install the robot controller app.'
+    dependsOn 'connectControlHub', 'installDebug'
+}
+
+tasks.configureEach { task ->
+    if (task.name == 'installDebug') {
+        task.mustRunAfter 'connectControlHub'
+    }
+}
