@@ -100,12 +100,15 @@ public class BiobuzzTeleop extends LinearOpMode {
     }
 
     private void getGamepadInputs() {
-        drive = -applyJoystickCurve(gamepad1.left_stick_y);
-        strafe = applyJoystickCurve(gamepad1.left_stick_x);
-        turn = applyJoystickCurve(gamepad1.right_stick_x);
+        double leftStickY = joystickExponentialCurve(gamepad1.left_stick_y);
+        double leftStickX = joystickExponentialCurve(gamepad1.left_stick_x);
+        double rightStickX = joystickExponentialCurve(gamepad1.right_stick_x);
+        drive = -leftStickY;
+        strafe = leftStickX;
+        turn = rightStickX;
 
-        laucherPower = applyJoystickCurve(gamepad2.right_stick_y);
-        intakePower = applyJoystickCurve(gamepad2.left_stick_y);
+        laucherPower = joystickExponentialCurve(deadzone(gamepad2.right_stick_y));
+        intakePower = joystickExponentialCurve(deadzone(gamepad2.left_stick_y));
 
         rampPosition = gamepad2.a && intakePower == 0.0;
 
@@ -130,19 +133,25 @@ public class BiobuzzTeleop extends LinearOpMode {
         }
     }
 
-    private double applyJoystickCurve(double gamepadInput) {
+    private double deadzone(double gamepadInput) {
         if (Math.abs(gamepadInput) < JOYSTICK_DEADZONE) {
             return 0.0;
         }
+        return gamepadInput;
+    }
+
+    private double joystickExponentialCurve(double gamepadInput) {
         gamepadInput = Math.max(-1.0, Math.min(1.0, gamepadInput));
-        return Math.signum(gamepadInput) * (gamepadInput * gamepadInput);
+        double sign = Math.signum(gamepadInput);
+        double absInput = Math.abs(gamepadInput);
+        return sign * (absInput * absInput);
     }
 
     private void calculateMecanumDrive() {
-        frontLeftPower = drive - strafe + turn;
-        frontRightPower = drive + strafe - turn;
-        backLeftPower = drive + strafe + turn;
-        backRightPower = drive - strafe - turn;
+        frontLeftPower = drive + strafe + turn;
+        frontRightPower = drive - strafe - turn;
+        backLeftPower = drive - strafe + turn;
+        backRightPower = drive + strafe - turn;
 
         double maxPower = Math.max(Math.abs(frontLeftPower), Math.abs(frontRightPower));
         maxPower = Math.max(maxPower, Math.abs(backLeftPower));
