@@ -104,8 +104,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         double leftStickX = joystickExponentialCurve(gamepad1.left_stick_x);
         double rightStickX = joystickExponentialCurve(gamepad1.right_stick_x);
         drive = -leftStickY;
-        strafe = leftStickX;
-        turn = rightStickX;
+        strafe = -leftStickX;
+        turn = -rightStickX;
 
         laucherPower = joystickExponentialCurve(deadzone(gamepad2.right_stick_y));
         intakePower = joystickExponentialCurve(deadzone(gamepad2.left_stick_y));
@@ -148,9 +148,9 @@ public class BiobuzzTeleop extends LinearOpMode {
     }
 
     private void calculateMecanumDrive() {
-        frontLeftPower = drive + strafe + turn;
+        frontLeftPower = drive - strafe + turn;
         frontRightPower = drive - strafe - turn;
-        backLeftPower = drive - strafe + turn;
+        backLeftPower = drive + strafe + turn;
         backRightPower = drive + strafe - turn;
 
         double maxPower = Math.max(Math.abs(frontLeftPower), Math.abs(frontRightPower));
