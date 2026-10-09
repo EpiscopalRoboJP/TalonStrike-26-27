@@ -43,7 +43,7 @@ public class BiobuzzTeleop extends LinearOpMode {
     private static final double RAMP_RANGE_DEGREES = 300.0;
     private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
-    private static final double JAVELIN_RUN_SECONDS = 8.0;
+    private static final double JAVELIN_RUN_SECONDS = 20.0;
     private static final double JAVELIN_POWER = 1.0;
 
     @Override
@@ -103,9 +103,9 @@ public class BiobuzzTeleop extends LinearOpMode {
         double leftStickY = joystickExponentialCurve(gamepad1.left_stick_y);
         double leftStickX = joystickExponentialCurve(gamepad1.left_stick_x);
         double rightStickX = joystickExponentialCurve(gamepad1.right_stick_x);
-        drive = -leftStickY;
-        strafe = -leftStickX;
-        turn = -rightStickX;
+        drive = leftStickY;
+        strafe = leftStickX;
+        turn = rightStickX;
 
         laucherPower = joystickExponentialCurve(deadzone(gamepad2.right_stick_y));
         intakePower = joystickExponentialCurve(deadzone(gamepad2.left_stick_y));
