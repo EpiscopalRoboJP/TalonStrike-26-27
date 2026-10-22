@@ -5,6 +5,7 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.VoltageSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 /**
@@ -31,12 +32,17 @@ public class BiobuzzTeleop extends LinearOpMode {
     private double drive;
     private double strafe;
     private double turn;
+    private double batteryVoltage;
 
     private boolean rampPosition;
+    private boolean rampLatchedUp;
+    private boolean prevBButton;
     private boolean prevLeftBumper;
     private boolean prevRightBumper;
     private boolean javelinDeployed;
     private boolean javelinRunning;
+    private boolean nectarMode;
+    private boolean prevDpadDown;
     private final ElapsedTime javelinTimer = new ElapsedTime();
 
     private static final double JOYSTICK_DEADZONE = 0.05;
@@ -45,6 +51,10 @@ public class BiobuzzTeleop extends LinearOpMode {
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
     private static final double JAVELIN_RUN_SECONDS = 20.0;
     private static final double JAVELIN_POWER = 1.0;
+    private static final double NECTAR_MAX_POWER = 1.0;
+    private static final double FLYWHEEL_VOLTAGE_HIGH = 12.7;
+    private static final double FLYWHEEL_VOLTAGE_MID = 12.5;
+    private static final double FLYWHEEL_VOLTAGE_LOW = 12.0;
 
     @Override
     public void runOpMode() {
@@ -105,12 +115,24 @@ public class BiobuzzTeleop extends LinearOpMode {
         double rightStickX = joystickExponentialCurve(gamepad1.right_stick_x);
         drive = leftStickY;
         strafe = leftStickX;
-        turn = rightStickX;
+        turn = -rightStickX;
 
-        laucherPower = joystickExponentialCurve(deadzone(gamepad2.right_stick_y));
+        if (gamepad2.dpad_down && !prevDpadDown) {
+            nectarMode = !nectarMode;
+        }
+        prevDpadDown = gamepad2.dpad_down;
+
+        double launcherCap = nectarMode ? NECTAR_MAX_POWER : flywheelPowerForVoltage(readBatteryVoltage());
+        laucherPower = launcherCap * joystickExponentialCurve(deadzone(gamepad2.right_stick_y));
         intakePower = joystickExponentialCurve(deadzone(gamepad2.left_stick_y));
 
-        rampPosition = gamepad2.a && intakePower == 0.0;
+        if (gamepad2.b && !prevBButton) {
+            rampLatchedUp = !rampLatchedUp;
+        }
+        prevBButton = gamepad2.b;
+
+        boolean rampHeldUp = gamepad2.a && intakePower == 0.0;
+        rampPosition = rampHeldUp || rampLatchedUp;
 
         boolean retractPressed = gamepad2.left_bumper && !prevLeftBumper;
         boolean deployPressed = gamepad2.right_bumper && !prevRightBumper;
@@ -131,6 +153,31 @@ public class BiobuzzTeleop extends LinearOpMode {
             javelinRunning = false;
             javelinPower = 0.0;
         }
+    }
+
+    private double readBatteryVoltage() {
+        double voltage = Double.POSITIVE_INFINITY;
+        for (VoltageSensor sensor : hardwareMap.voltageSensor) {
+            double reading = sensor.getVoltage();
+            if (reading > 0) {
+                voltage = Math.min(voltage, reading);
+            }
+        }
+        batteryVoltage = voltage == Double.POSITIVE_INFINITY ? FLYWHEEL_VOLTAGE_HIGH : voltage;
+        return batteryVoltage;
+    }
+
+    private double flywheelPowerForVoltage(double voltage) {
+        if (voltage > FLYWHEEL_VOLTAGE_HIGH) {
+            return 0.6;
+        }
+        if (voltage >= FLYWHEEL_VOLTAGE_MID) {
+            return 0.65;
+        }
+        if (voltage >= FLYWHEEL_VOLTAGE_LOW) {
+            return 0.7;
+        }
+        return 0.75;
     }
 
     private double deadzone(double gamepadInput) {
@@ -196,6 +243,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addData("Strafe", "%.2f", strafe);
         telemetry.addData("Turn", "%.2f", turn);
         telemetry.addData("Intake", "%.2f", intakePower);
+        telemetry.addData("Launch mode", nectarMode ? "nectar" : "pollen");
+        telemetry.addData("Battery", "%.2f V", batteryVoltage);
         telemetry.addData("Laucher", "%.2f", laucherPower);
         telemetry.addData("Ramp", rampPosition ? "up 180 deg" : "down 90 deg");
         if (javelinRunning) {
@@ -211,7 +260,9 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addLine("GP1 right stick: turn");
         telemetry.addLine("GP2 left stick: intake");
         telemetry.addLine("GP2 right stick: launcher");
-        telemetry.addLine("GP2 A: ramp up while held, down while intake runs");
+        telemetry.addLine("GP2 dpad down: pollen / nectar");
+        telemetry.addLine("GP2 A: hold ramp up while intake is stopped");
+        telemetry.addLine("GP2 B: toggle ramp up or down");
         telemetry.addLine("GP2 left bumper: retract javelin");
         telemetry.addLine("GP2 right bumper: deploy javelin");
         telemetry.update();
