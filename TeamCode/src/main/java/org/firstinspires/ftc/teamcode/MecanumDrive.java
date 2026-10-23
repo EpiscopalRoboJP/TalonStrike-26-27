@@ -65,22 +65,22 @@ public final class MecanumDrive {
         // goBILDA 48 mm pod, 2000 counts per revolution. Replace with the ForwardPushTest result.
         public double inPerTick = (48.0 / 25.4) * Math.PI / 2000.0;
         public double lateralInPerTick = inPerTick;
-        // Placeholder: 12 in between the drive wheels. Replace with the AngularRampLogger result.
-        public double trackWidthTicks = 12.0 / inPerTick;
+        // Placeholder span between the drive wheels. Replace with the AngularRampLogger result.
+        public double trackWidthTicks = AutoProfile.TRACK_WIDTH_IN / inPerTick;
 
         // Untuned starting values so paths move before feedforward tuning. kV is in tick units.
         public double kS = 1.0;
-        public double kV = (12.0 / 50.0) * inPerTick;
+        public double kV = (12.0 / AutoProfile.MAX_WHEEL_VEL) * inPerTick;
         public double kA = 0;
 
-        // path profile parameters (in inches)
-        public double maxWheelVel = 50;
-        public double minProfileAccel = -30;
-        public double maxProfileAccel = 50;
+        // Path and turn limits. AutoProfile is the copy MeepMeep uses, so keep edits there.
+        public double maxWheelVel = AutoProfile.MAX_WHEEL_VEL;
+        public double minProfileAccel = AutoProfile.MIN_PROFILE_ACCEL;
+        public double maxProfileAccel = AutoProfile.MAX_PROFILE_ACCEL;
 
         // turn profile parameters (in radians)
-        public double maxAngVel = Math.PI; // shared with path
-        public double maxAngAccel = Math.PI;
+        public double maxAngVel = AutoProfile.MAX_ANG_VEL; // shared with path
+        public double maxAngAccel = AutoProfile.MAX_ANG_ACCEL;
 
         // path controller gains
         public double axialGain = 2.0;
@@ -234,9 +234,11 @@ public final class MecanumDrive {
         rightBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         rightFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        // Matches BiobuzzTeleop so forward power drives forward.
+        // Same directions as BiobuzzTeleop: left side reversed, right side forward.
         leftFront.setDirection(DcMotorSimple.Direction.REVERSE);
         leftBack.setDirection(DcMotorSimple.Direction.REVERSE);
+        rightBack.setDirection(DcMotorSimple.Direction.FORWARD);
+        rightFront.setDirection(DcMotorSimple.Direction.FORWARD);
 
         // TODO: make sure your config has an IMU with this name (can be BNO or BHI)
         //   see https://ftc-docs.firstinspires.org/en/latest/hardware_and_software_configuration/configuring/index.html
@@ -259,10 +261,37 @@ public final class MecanumDrive {
             maxPowerMag = Math.max(maxPowerMag, power.value());
         }
 
-        leftFront.setPower(wheelVels.leftFront.get(0) / maxPowerMag);
-        leftBack.setPower(wheelVels.leftBack.get(0) / maxPowerMag);
-        rightBack.setPower(wheelVels.rightBack.get(0) / maxPowerMag);
-        rightFront.setPower(wheelVels.rightFront.get(0) / maxPowerMag);
+        setTeleopWheelPowers(
+                wheelVels.leftFront.get(0) / maxPowerMag,
+                wheelVels.leftBack.get(0) / maxPowerMag,
+                wheelVels.rightBack.get(0) / maxPowerMag,
+                wheelVels.rightFront.get(0) / maxPowerMag,
+                Double.NaN);
+    }
+
+    /**
+     * BiobuzzTeleop commands forward with negative power on every wheel, and the
+     * right front and right back mixes are crossed relative to Road Runner.
+     * {@code FL = drive - strafe + turn}, with drive negative for forward.
+     */
+    private void setTeleopWheelPowers(
+            double rrLeftFront,
+            double rrLeftBack,
+            double rrRightBack,
+            double rrRightFront,
+            double voltage) {
+        double leftFrontPower = -rrLeftFront;
+        double leftBackPower = -rrLeftBack;
+        double rightFrontPower = -rrRightBack;
+        double rightBackPower = -rrRightFront;
+        if (!Double.isNaN(voltage)) {
+            mecanumCommandWriter.write(new MecanumCommandMessage(
+                    voltage, leftFrontPower, leftBackPower, rightBackPower, rightFrontPower));
+        }
+        leftFront.setPower(leftFrontPower);
+        leftBack.setPower(leftBackPower);
+        rightBack.setPower(rightBackPower);
+        rightFront.setPower(rightFrontPower);
     }
 
     public final class FollowTrajectoryAction implements Action {
@@ -322,18 +351,12 @@ public final class MecanumDrive {
 
             final MotorFeedforward feedforward = new MotorFeedforward(PARAMS.kS,
                     PARAMS.kV / PARAMS.inPerTick, PARAMS.kA / PARAMS.inPerTick);
-            double leftFrontPower = feedforward.compute(wheelVels.leftFront) / voltage;
-            double leftBackPower = feedforward.compute(wheelVels.leftBack) / voltage;
-            double rightBackPower = feedforward.compute(wheelVels.rightBack) / voltage;
-            double rightFrontPower = feedforward.compute(wheelVels.rightFront) / voltage;
-            mecanumCommandWriter.write(new MecanumCommandMessage(
-                    voltage, leftFrontPower, leftBackPower, rightBackPower, rightFrontPower
-            ));
-
-            leftFront.setPower(leftFrontPower);
-            leftBack.setPower(leftBackPower);
-            rightBack.setPower(rightBackPower);
-            rightFront.setPower(rightFrontPower);
+            setTeleopWheelPowers(
+                    feedforward.compute(wheelVels.leftFront) / voltage,
+                    feedforward.compute(wheelVels.leftBack) / voltage,
+                    feedforward.compute(wheelVels.rightBack) / voltage,
+                    feedforward.compute(wheelVels.rightFront) / voltage,
+                    voltage);
 
             p.put("x", localizer.getPose().position.x);
             p.put("y", localizer.getPose().position.y);
@@ -413,18 +436,12 @@ public final class MecanumDrive {
             double voltage = voltageSensor.getVoltage();
             final MotorFeedforward feedforward = new MotorFeedforward(PARAMS.kS,
                     PARAMS.kV / PARAMS.inPerTick, PARAMS.kA / PARAMS.inPerTick);
-            double leftFrontPower = feedforward.compute(wheelVels.leftFront) / voltage;
-            double leftBackPower = feedforward.compute(wheelVels.leftBack) / voltage;
-            double rightBackPower = feedforward.compute(wheelVels.rightBack) / voltage;
-            double rightFrontPower = feedforward.compute(wheelVels.rightFront) / voltage;
-            mecanumCommandWriter.write(new MecanumCommandMessage(
-                    voltage, leftFrontPower, leftBackPower, rightBackPower, rightFrontPower
-            ));
-
-            leftFront.setPower(feedforward.compute(wheelVels.leftFront) / voltage);
-            leftBack.setPower(feedforward.compute(wheelVels.leftBack) / voltage);
-            rightBack.setPower(feedforward.compute(wheelVels.rightBack) / voltage);
-            rightFront.setPower(feedforward.compute(wheelVels.rightFront) / voltage);
+            setTeleopWheelPowers(
+                    feedforward.compute(wheelVels.leftFront) / voltage,
+                    feedforward.compute(wheelVels.leftBack) / voltage,
+                    feedforward.compute(wheelVels.rightBack) / voltage,
+                    feedforward.compute(wheelVels.rightFront) / voltage,
+                    voltage);
 
             Canvas c = p.fieldOverlay();
             drawPoseHistory(c);

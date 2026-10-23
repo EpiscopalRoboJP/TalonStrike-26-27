@@ -49,12 +49,15 @@ public class BiobuzzTeleop extends LinearOpMode {
     private static final double RAMP_RANGE_DEGREES = 300.0;
     private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
-    private static final double JAVELIN_RUN_SECONDS = 20.0;
+    private static final double JAVELIN_RUN_SECONDS = 13.0;
     private static final double JAVELIN_POWER = 1.0;
     private static final double NECTAR_MAX_POWER = 1.0;
-    private static final double FLYWHEEL_VOLTAGE_HIGH = 12.7;
-    private static final double FLYWHEEL_VOLTAGE_MID = 12.5;
-    private static final double FLYWHEEL_VOLTAGE_LOW = 12.0;
+    private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
+    private static final double FLYWHEEL_VOLTAGE_MID = 12.6;
+    private static final double FLYWHEEL_VOLTAGE_LOW = 12.3;
+    private static final double FLYWHEEL_POWER_HIGH = 0.55;
+    private static final double FLYWHEEL_POWER_MID = 0.6;
+    private static final double FLYWHEEL_POWER_LOW = 0.65;
 
     @Override
     public void runOpMode() {
@@ -168,16 +171,18 @@ public class BiobuzzTeleop extends LinearOpMode {
     }
 
     private double flywheelPowerForVoltage(double voltage) {
-        if (voltage > FLYWHEEL_VOLTAGE_HIGH) {
-            return 0.6;
+        if (voltage >= FLYWHEEL_VOLTAGE_HIGH) {
+            return FLYWHEEL_POWER_HIGH;
         }
         if (voltage >= FLYWHEEL_VOLTAGE_MID) {
-            return 0.65;
+            return FLYWHEEL_POWER_MID;
         }
-        if (voltage >= FLYWHEEL_VOLTAGE_LOW) {
-            return 0.7;
+        if (voltage <= FLYWHEEL_VOLTAGE_LOW) {
+            return FLYWHEEL_POWER_LOW;
         }
-        return 0.75;
+        double span = FLYWHEEL_VOLTAGE_MID - FLYWHEEL_VOLTAGE_LOW;
+        double drop = (FLYWHEEL_VOLTAGE_MID - voltage) / span;
+        return FLYWHEEL_POWER_MID + drop * (FLYWHEEL_POWER_LOW - FLYWHEEL_POWER_MID);
     }
 
     private double deadzone(double gamepadInput) {
@@ -191,7 +196,7 @@ public class BiobuzzTeleop extends LinearOpMode {
         gamepadInput = Math.max(-1.0, Math.min(1.0, gamepadInput));
         double sign = Math.signum(gamepadInput);
         double absInput = Math.abs(gamepadInput);
-        return sign * (absInput * absInput);
+        return sign * Math.pow(absInput, 4);
     }
 
     private void calculateMecanumDrive() {

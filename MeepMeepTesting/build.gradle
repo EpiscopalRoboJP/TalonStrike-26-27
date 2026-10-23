@@ -1,0 +1,32 @@
+plugins {
+    id 'application'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+application {
+    mainClass = 'org.firstinspires.ftc.teamcode.meepmeep.MeepMeepTesting'
+    applicationDefaultJvmArgs = ['-Dsun.java2d.opengl=true']
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.brott.dev/' }
+}
+
+dependencies {
+    implementation 'com.acmerobotics.roadrunner:MeepMeep:0.1.7'
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir '../TeamCode/src/main/java'
+            include 'org/firstinspires/ftc/teamcode/meepmeep/**'
+            include 'org/firstinspires/ftc/teamcode/AutoProfile.java'
+        }
+    }
+}

@@ -15,6 +15,7 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.VoltageSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 import static com.acmerobotics.roadrunner.Actions.now;
@@ -23,11 +24,14 @@ import static com.acmerobotics.roadrunner.Actions.now;
  * Autonomous: shoot the 4 preloaded Pollen from the start spot, then park in the Loading Zone.
  * Driving uses Road Runner. Position comes from the three dead-wheel pods on FL, BR, and BL.
  *
- * No driver input after the opmode is selected. The robot aims at the Cell that starts facing up.
- * X is forward and Y is left, both measured from the start pose. Positive heading is counter-clockwise.
+ * No driver input after the opmode is selected. Heading stays pointed away from the audience.
  *
- * Before this is accurate, run the quickstart tuning opmodes and copy the results into
- * MecanumDrive.PARAMS and ThreeDeadWheelLocalizer.PARAMS. The values there now are placeholders.
+ * Place the robot on the red side, touching the audience wall, facing away from
+ * the audience. The route and drive limits live in AutoProfile, which MeepMeep reads too.
+ * The preload is 4 pollen, so the launcher stays on BiobuzzTeleop's pollen curve
+ * for the whole auto and stops only when the routine ends. The javelin stroke matches teleop.
+ * Feedforward and dead-wheel geometry in MecanumDrive.PARAMS are still placeholders
+ * until the tuning opmodes have been run.
  */
 @Autonomous(name = "BiobuzzAuto", group = "TeamCode", preselectTeleOp = "BiobuzzTeleop")
 public class BiobuzzAuto extends LinearOpMode {
@@ -43,22 +47,19 @@ public class BiobuzzAuto extends LinearOpMode {
     private static final double RAMP_RANGE_DEGREES = 300.0;
     private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
-    private static final double JAVELIN_RUN_SECONDS = 20.0;
+    // Full deploy stroke from BiobuzzTeleop. Longer than this stalls the servo at the stop.
+    private static final double JAVELIN_RUN_SECONDS = 13.0;
     private static final double JAVELIN_POWER = 1.0;
 
-    private static final double LAUNCH_POWER = 1.0;
     private static final double INTAKE_FEED_POWER = 1.0;
-    private static final double SPINUP_SECONDS = 1.5;
-    private static final double FEED_PULSE_SECONDS = 0.4;
-    private static final double INTAKE_INDEX_SECONDS = 0.6;
-    private static final double BETWEEN_SHOTS_SECONDS = 0.5;
-    private static final int SHOT_COUNT = 4;
 
-    private static final double CELL_HEADING_DEG = 0.0;
-
-    private static final double PARK_X_IN = 24.0;
-    private static final double PARK_Y_IN = 0.0;
-    private static final double PARK_HEADING_DEG = 0.0;
+    // Pollen flywheel curve from BiobuzzTeleop. The preload is pollen, so nectar power is never used.
+    private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
+    private static final double FLYWHEEL_VOLTAGE_MID = 12.6;
+    private static final double FLYWHEEL_VOLTAGE_LOW = 12.3;
+    private static final double FLYWHEEL_POWER_HIGH = 0.55;
+    private static final double FLYWHEEL_POWER_MID = 0.6;
+    private static final double FLYWHEEL_POWER_LOW = 0.65;
 
     private static final double SHOOT_CUTOFF_SECONDS = 24.0;
 
@@ -77,15 +78,16 @@ public class BiobuzzAuto extends LinearOpMode {
         }
 
         autoTimer.reset();
-        drive.localizer.setPose(new Pose2d(0, 0, 0));
-        laucher.setPower(LAUNCH_POWER);
+        drive.localizer.setPose(AutoProfile.START);
+        laucher.setPower(pollenPower());
 
         Actions.runBlocking(new ParallelAction(
                 deployJavelin(),
                 new SequentialAction(
-                        aim(Math.toRadians(CELL_HEADING_DEG)),
+                        driveTo(AutoProfile.shootPose(), "approach", false),
                         shoot(),
-                        park()
+                        driveTo(AutoProfile.afterLeftPose(), "park", false),
+                        driveTo(AutoProfile.parkPose(), "park", true)
                 )
         ));
 
@@ -97,7 +99,7 @@ public class BiobuzzAuto extends LinearOpMode {
         laucher = hardwareMap.get(DcMotor.class, "Laucher");
         ramp = hardwareMap.get(Servo.class, "Ramp");
         javelin = hardwareMap.get(CRServo.class, "Javelin");
-        drive = new MecanumDrive(hardwareMap, new Pose2d(0, 0, 0));
+        drive = new MecanumDrive(hardwareMap, AutoProfile.START);
 
         laucher.setDirection(DcMotor.Direction.FORWARD);
         laucher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -107,40 +109,19 @@ public class BiobuzzAuto extends LinearOpMode {
         stopActuators();
     }
 
-    private Action aim(double aimRadians) {
+    private Action driveTo(Pose2d target, String stageName, boolean endsPark) {
         return new Action() {
             private Action inner;
 
             @Override
             public boolean run(@NonNull TelemetryPacket packet) {
-                stage = "aim";
+                stage = stageName;
+                laucher.setPower(pollenPower());
                 if (inner == null) {
-                    inner = drive.actionBuilder(drive.localizer.getPose())
-                            .turn(turnDelta(aimRadians))
-                            .build();
+                    inner = follow(target.position, target.heading.toDouble());
                 }
                 boolean running = inner.run(packet);
-                updateTelemetry();
-                return running;
-            }
-        };
-    }
-
-    private Action park() {
-        return new Action() {
-            private Action inner;
-
-            @Override
-            public boolean run(@NonNull TelemetryPacket packet) {
-                stage = "park";
-                if (inner == null) {
-                    inner = drive.actionBuilder(drive.localizer.getPose())
-                            .strafeTo(new Vector2d(PARK_X_IN, PARK_Y_IN))
-                            .turn(turnDelta(Math.toRadians(PARK_HEADING_DEG)))
-                            .build();
-                }
-                boolean running = inner.run(packet);
-                if (!running) {
+                if (!running && endsPark) {
                     stage = "parked";
                 }
                 updateTelemetry();
@@ -149,15 +130,9 @@ public class BiobuzzAuto extends LinearOpMode {
         };
     }
 
-    private double turnDelta(double targetRadians) {
-        double delta = targetRadians - drive.localizer.getPose().heading.toDouble();
-        while (delta > Math.PI) {
-            delta -= 2.0 * Math.PI;
-        }
-        while (delta < -Math.PI) {
-            delta += 2.0 * Math.PI;
-        }
-        return delta;
+    private Action follow(Vector2d target, double targetHeadingRadians) {
+        Pose2d pose = drive.localizer.getPose();
+        return AutoProfile.append(drive.actionBuilder(pose), pose, target, targetHeadingRadians).build();
     }
 
     private Action deployJavelin() {
@@ -180,19 +155,17 @@ public class BiobuzzAuto extends LinearOpMode {
     }
 
     private Action shoot() {
-        final double totalSeconds = SPINUP_SECONDS
-                + SHOT_COUNT * FEED_PULSE_SECONDS
-                + (SHOT_COUNT - 1) * (INTAKE_INDEX_SECONDS + BETWEEN_SHOTS_SECONDS);
+        final double totalSeconds = AutoProfile.shootSeconds();
         return new Action() {
             private double startedAt = -1;
 
             @Override
             public boolean run(@NonNull TelemetryPacket packet) {
                 stage = "shoot";
+                laucher.setPower(pollenPower());
                 if (autoTimer.seconds() >= SHOOT_CUTOFF_SECONDS) {
                     intake.setPower(0);
                     ramp.setPosition(RAMP_DOWN_POSITION);
-                    laucher.setPower(0);
                     return false;
                 }
                 if (startedAt < 0) {
@@ -202,25 +175,24 @@ public class BiobuzzAuto extends LinearOpMode {
                 if (elapsed >= totalSeconds) {
                     intake.setPower(0);
                     ramp.setPosition(RAMP_DOWN_POSITION);
-                    laucher.setPower(0);
                     return false;
                 }
 
                 boolean rampUp = false;
                 boolean intakeOn = false;
-                double cursor = SPINUP_SECONDS;
-                for (int shot = 0; shot < SHOT_COUNT; shot++) {
-                    double feedEnd = cursor + FEED_PULSE_SECONDS;
+                double cursor = AutoProfile.SPINUP_SECONDS;
+                for (int shot = 0; shot < AutoProfile.SHOT_COUNT; shot++) {
+                    double feedEnd = cursor + AutoProfile.FEED_PULSE_SECONDS;
                     if (elapsed >= cursor && elapsed < feedEnd) {
                         rampUp = true;
                     }
                     cursor = feedEnd;
-                    if (shot < SHOT_COUNT - 1) {
-                        double intakeEnd = cursor + INTAKE_INDEX_SECONDS;
+                    if (shot < AutoProfile.SHOT_COUNT - 1) {
+                        double intakeEnd = cursor + AutoProfile.INTAKE_INDEX_SECONDS;
                         if (elapsed >= cursor && elapsed < intakeEnd) {
                             intakeOn = true;
                         }
-                        cursor = intakeEnd + BETWEEN_SHOTS_SECONDS;
+                        cursor = intakeEnd + AutoProfile.BETWEEN_SHOTS_SECONDS;
                     }
                 }
                 ramp.setPosition(rampUp ? RAMP_UP_POSITION : RAMP_DOWN_POSITION);
@@ -238,10 +210,40 @@ public class BiobuzzAuto extends LinearOpMode {
         javelin.setPower(0);
     }
 
+    private double pollenPower() {
+        double voltage = Double.POSITIVE_INFINITY;
+        for (VoltageSensor sensor : hardwareMap.voltageSensor) {
+            double reading = sensor.getVoltage();
+            if (reading > 0) {
+                voltage = Math.min(voltage, reading);
+            }
+        }
+        if (voltage == Double.POSITIVE_INFINITY) {
+            voltage = FLYWHEEL_VOLTAGE_HIGH;
+        }
+        return flywheelPowerForVoltage(voltage);
+    }
+
+    private double flywheelPowerForVoltage(double voltage) {
+        if (voltage >= FLYWHEEL_VOLTAGE_HIGH) {
+            return FLYWHEEL_POWER_HIGH;
+        }
+        if (voltage >= FLYWHEEL_VOLTAGE_MID) {
+            return FLYWHEEL_POWER_MID;
+        }
+        if (voltage <= FLYWHEEL_VOLTAGE_LOW) {
+            return FLYWHEEL_POWER_LOW;
+        }
+        double span = FLYWHEEL_VOLTAGE_MID - FLYWHEEL_VOLTAGE_LOW;
+        double drop = (FLYWHEEL_VOLTAGE_MID - voltage) / span;
+        return FLYWHEEL_POWER_MID + drop * (FLYWHEEL_POWER_LOW - FLYWHEEL_POWER_MID);
+    }
+
     private void updateTelemetry() {
         Pose2d pose = drive.localizer.getPose();
         telemetry.addData("Stage", stage);
         telemetry.addData("Auto time", "%.1f s", opModeIsActive() ? autoTimer.seconds() : 0.0);
+        telemetry.addData("Launcher", "%.2f", laucher.getPower());
         telemetry.addData("Pose", "x %.1f in  y %.1f in  h %.1f deg",
                 pose.position.x, pose.position.y, Math.toDegrees(pose.heading.toDouble()));
         telemetry.update();
