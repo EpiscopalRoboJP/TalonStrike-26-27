@@ -6,7 +6,6 @@ import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
-import com.qualcomm.robotcore.util.ElapsedTime;
 
 /**
  * Teleop for GoBilda mecanum drive with a continuous-rotation intake.
@@ -37,19 +36,14 @@ public class BiobuzzTeleop extends LinearOpMode {
     private boolean rampPosition;
     private boolean rampLatchedUp;
     private boolean prevBButton;
-    private boolean prevLeftBumper;
-    private boolean prevRightBumper;
-    private boolean javelinDeployed;
-    private boolean javelinRunning;
     private boolean nectarMode;
     private boolean prevDpadDown;
-    private final ElapsedTime javelinTimer = new ElapsedTime();
 
     private static final double JOYSTICK_DEADZONE = 0.05;
+    private static final double AIM_TURN_POWER = 0.08;
     private static final double RAMP_RANGE_DEGREES = 300.0;
     private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
-    private static final double JAVELIN_RUN_SECONDS = 13.0;
     private static final double JAVELIN_POWER = 1.0;
     private static final double NECTAR_MAX_POWER = 1.0;
     private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
@@ -119,6 +113,11 @@ public class BiobuzzTeleop extends LinearOpMode {
         drive = leftStickY;
         strafe = leftStickX;
         turn = -rightStickX;
+        if (gamepad1.dpad_left && !gamepad1.dpad_right) {
+            turn += AIM_TURN_POWER;
+        } else if (gamepad1.dpad_right && !gamepad1.dpad_left) {
+            turn -= AIM_TURN_POWER;
+        }
 
         if (gamepad2.dpad_down && !prevDpadDown) {
             nectarMode = !nectarMode;
@@ -137,23 +136,13 @@ public class BiobuzzTeleop extends LinearOpMode {
         boolean rampHeldUp = gamepad2.a && intakePower == 0.0;
         rampPosition = rampHeldUp || rampLatchedUp;
 
-        boolean retractPressed = gamepad2.left_bumper && !prevLeftBumper;
-        boolean deployPressed = gamepad2.right_bumper && !prevRightBumper;
-        prevLeftBumper = gamepad2.left_bumper;
-        prevRightBumper = gamepad2.right_bumper;
-
-        if (retractPressed != deployPressed) {
-            double commandedPower = retractPressed ? JAVELIN_POWER : -JAVELIN_POWER;
-            if (!javelinRunning || javelinPower != commandedPower) {
-                javelinRunning = true;
-                javelinTimer.reset();
-                javelinPower = commandedPower;
-            }
-        }
-
-        if (javelinRunning && javelinTimer.seconds() >= JAVELIN_RUN_SECONDS) {
-            javelinDeployed = javelinPower < 0.0;
-            javelinRunning = false;
+        boolean retractHeld = gamepad2.left_bumper;
+        boolean deployHeld = gamepad2.right_bumper;
+        if (retractHeld && !deployHeld) {
+            javelinPower = JAVELIN_POWER;
+        } else if (deployHeld && !retractHeld) {
+            javelinPower = -JAVELIN_POWER;
+        } else {
             javelinPower = 0.0;
         }
     }
@@ -238,7 +227,6 @@ public class BiobuzzTeleop extends LinearOpMode {
         backRightMotor.setPower(0);
         intake.setPower(0);
         laucher.setPower(0);
-        javelinRunning = false;
         javelinPower = 0.0;
         javelin.setPower(0);
     }
@@ -252,24 +240,25 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addData("Battery", "%.2f V", batteryVoltage);
         telemetry.addData("Laucher", "%.2f", laucherPower);
         telemetry.addData("Ramp", rampPosition ? "up 180 deg" : "down 90 deg");
-        if (javelinRunning) {
-            telemetry.addData("Javelin", "%s  %.1f s left",
-                    javelinPower < 0.0 ? "deploying" : "retracting",
-                    JAVELIN_RUN_SECONDS - javelinTimer.seconds());
+        if (javelinPower > 0.0) {
+            telemetry.addData("Javelin", "retracting");
+        } else if (javelinPower < 0.0) {
+            telemetry.addData("Javelin", "deploying");
         } else {
-            telemetry.addData("Javelin", javelinDeployed ? "deployed" : "start");
+            telemetry.addData("Javelin", "stopped");
         }
 
         telemetry.addLine("Controls");
         telemetry.addLine("GP1 left stick: drive / strafe");
         telemetry.addLine("GP1 right stick: turn");
+        telemetry.addLine("GP1 dpad left / right: minor aim");
         telemetry.addLine("GP2 left stick: intake");
         telemetry.addLine("GP2 right stick: launcher");
         telemetry.addLine("GP2 dpad down: pollen / nectar");
         telemetry.addLine("GP2 A: hold ramp up while intake is stopped");
         telemetry.addLine("GP2 B: toggle ramp up or down");
-        telemetry.addLine("GP2 left bumper: retract javelin");
-        telemetry.addLine("GP2 right bumper: deploy javelin");
+        telemetry.addLine("GP2 left bumper: hold to retract javelin");
+        telemetry.addLine("GP2 right bumper: hold to deploy javelin");
         telemetry.update();
     }
 }
