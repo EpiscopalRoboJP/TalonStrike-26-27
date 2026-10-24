@@ -51,7 +51,7 @@ public class BiobuzzAuto extends LinearOpMode {
     private static final double JAVELIN_RUN_SECONDS = 13.0;
     private static final double JAVELIN_POWER = 1.0;
 
-    private static final double INTAKE_FEED_POWER = 1.0;
+    private static final double INTAKE_FEED_POWER = -1.0;
 
     // Pollen flywheel curve from BiobuzzTeleop. The preload is pollen, so nectar power is never used.
     private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
@@ -83,7 +83,7 @@ public class BiobuzzAuto extends LinearOpMode {
         laucher.setPower(pollenPower());
 
         Actions.runBlocking(new ParallelAction(
-                deployJavelin(),
+                // deployJavelin(),
                 new SequentialAction(
                         driveTo(AutoProfile.shootPose(), "approach", false),
                         shoot(),

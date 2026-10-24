@@ -83,7 +83,7 @@ public final class AutoProfile {
     }
 
     public static Pose2d fullParkPose(Pose2d start) {
-        return offset(parkPose(start), 0.0, 0.5 * TILE_IN);
+        return offset(parkPose(start), 0.0, 0.3 * TILE_IN);
     }
 
     /**
