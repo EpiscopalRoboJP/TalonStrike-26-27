@@ -75,7 +75,7 @@ public final class AutoProfile {
     }
 
     public static Pose2d afterLeftPose(Pose2d start) {
-        return offset(shootPose(start), 0.0, 1.25 * TILE_IN);
+        return offset(shootPose(start), 0.4, 1.25 * TILE_IN);
     }
 
     public static Pose2d parkPose(Pose2d start) {

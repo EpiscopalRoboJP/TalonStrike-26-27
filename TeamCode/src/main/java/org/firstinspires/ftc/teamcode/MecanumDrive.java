@@ -64,13 +64,14 @@ public final class MecanumDrive {
 
         // ForwardPushTest: 24323 ticks over the default 48 in push.
         public double inPerTick = 48.0 / 24323.0;
-        public double lateralInPerTick = inPerTick;
+        // LateralRampLogger slope, using the forward-ramp kS and kV below.
+        public double lateralInPerTick = 0.0016497497762143296;
         // Placeholder span between the drive wheels. Replace with the AngularRampLogger result.
         public double trackWidthTicks = AutoProfile.TRACK_WIDTH_IN / inPerTick;
 
-        // Untuned starting values so paths move before feedforward tuning. kV is in tick units.
-        public double kS = 1.0;
-        public double kV = (12.0 / AutoProfile.MAX_WHEEL_VEL) * inPerTick;
+        // ForwardRampLogger. kV is volts per tick/s, the same number the tuner page shows.
+        public double kS = 0.6671869316870191;
+        public double kV = 0.0003455348745672605;
         public double kA = 0;
 
         // Path and turn limits. AutoProfile is the copy MeepMeep uses, so keep edits there.
