@@ -62,8 +62,8 @@ public final class MecanumDrive {
         public RevHubOrientationOnRobot.UsbFacingDirection usbFacingDirection =
                 RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
 
-        // ForwardPushTest: 23825 ticks over the default 48 in push.
-        public double inPerTick = 48.0 / 23825.0;
+        // ForwardPushTest: 24323 ticks over the default 48 in push.
+        public double inPerTick = 48.0 / 24323.0;
         public double lateralInPerTick = inPerTick;
         // Placeholder span between the drive wheels. Replace with the AngularRampLogger result.
         public double trackWidthTicks = AutoProfile.TRACK_WIDTH_IN / inPerTick;

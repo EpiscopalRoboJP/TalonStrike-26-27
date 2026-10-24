@@ -186,13 +186,15 @@ public final class TuningOpModes {
                         MecanumDrive.PARAMS.minProfileAccel,
                         MecanumDrive.PARAMS.maxProfileAccel,
                         encoderGroups,
+                        // Same mix as BiobuzzTeleop: negative power is forward, and the
+                        // right wheels are crossed against Road Runner's names.
                         Arrays.asList(
-                                md.leftFront,
-                                md.leftBack
+                                TeleopWheel.negated(md.leftFront),
+                                TeleopWheel.negated(md.leftBack)
                         ),
                         Arrays.asList(
-                                md.rightFront,
-                                md.rightBack
+                                TeleopWheel.negated(md.rightBack),
+                                TeleopWheel.negated(md.rightFront)
                         ),
                         leftEncs,
                         rightEncs,

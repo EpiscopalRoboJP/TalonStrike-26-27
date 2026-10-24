@@ -41,8 +41,8 @@ public final class AutoProfile {
     public static final double SPINUP_SECONDS = 1.5;
     public static final double FEED_PULSE_SECONDS = 0.4;
     public static final double INTAKE_INDEX_SECONDS = 0.6;
-    public static final double BETWEEN_SHOTS_SECONDS = 0.5;
-    public static final int SHOT_COUNT = 4;
+    public static final double BETWEEN_SHOTS_SECONDS = 0.2;
+    public static final int SHOT_COUNT = 10;
 
     // Road Runner refuses a profile whose length is 0.
     public static final double MIN_TURN_RAD = Math.toRadians(0.5);
@@ -83,7 +83,7 @@ public final class AutoProfile {
     }
 
     public static Pose2d fullParkPose(Pose2d start) {
-        return offset(parkPose(start), 0.0, 0.3 * TILE_IN);
+        return offset(parkPose(start), 0.0, 0.1 * TILE_IN);
     }
 
     /**

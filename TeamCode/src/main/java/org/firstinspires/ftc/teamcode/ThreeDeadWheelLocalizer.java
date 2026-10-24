@@ -24,9 +24,9 @@ public final class ThreeDeadWheelLocalizer implements Localizer {
     public static class Params {
         // Placeholders for a 12 in left-to-right span and a back pod 6 in behind center.
         // Left is +Y and forward is +X. Replace these with the AngularRampLogger results.
-        public double par0YTicks = 6.0 / (48.0 / 23825.0);
+        public double par0YTicks = 6.0 / (48.0 / 24323.0);
         public double par1YTicks = -par0YTicks;
-        public double perpXTicks = -6.0 / (48.0 / 23825.0);
+        public double perpXTicks = -6.0 / (48.0 / 24323.0);
 
         // Direction debugger: par0 and perp were already reversed, so leave them forward.
         public boolean par0Reversed = false;
