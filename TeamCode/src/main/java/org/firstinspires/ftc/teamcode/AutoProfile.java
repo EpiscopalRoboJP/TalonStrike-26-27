@@ -14,8 +14,8 @@ import com.acmerobotics.roadrunner.Vector2d;
  * forward is along the heading and left is 90 degrees counter-clockwise.
  *
  * Red starts against the audience wall, facing away from it. The route is
- * 0.5 tile forward, shoot, 1.5 tiles left, then 3.5 tiles forward. That ends
- * against the red wall inside tile A5, which is the red loading zone.
+ * 0.5 tile forward, shoot, 1.25 tiles left, 3 tiles forward, then 0.5 tile
+ * left into the red loading zone.
  */
 public final class AutoProfile {
     private AutoProfile() {
@@ -66,31 +66,41 @@ public final class AutoProfile {
         return parkPose(START);
     }
 
+    public static Pose2d fullParkPose() {
+        return fullParkPose(START);
+    }
+
     public static Pose2d shootPose(Pose2d start) {
         return offset(start, 0.5 * TILE_IN, 0.0);
     }
 
     public static Pose2d afterLeftPose(Pose2d start) {
-        return offset(shootPose(start), 0.0, 1.5 * TILE_IN);
+        return offset(shootPose(start), 0.0, 1.25 * TILE_IN);
     }
 
     public static Pose2d parkPose(Pose2d start) {
-        return offset(afterLeftPose(start), 3.5 * TILE_IN, 0.0);
+        return offset(afterLeftPose(start), 3.0 * TILE_IN, 0.0);
+    }
+
+    public static Pose2d fullParkPose(Pose2d start) {
+        return offset(parkPose(start), 0.0, 0.5 * TILE_IN);
     }
 
     /**
-     * Drive forward half a tile, wait out the four pollen shots, strafe left 1.5 tiles,
-     * then drive forward 3.5 tiles into the loading zone. The builder must already
-     * be started at {@code start}.
+     * Drive forward half a tile, wait out the four pollen shots, strafe left,
+     * drive forward, then strafe left half a tile to finish in the loading zone.
+     * The builder must already be started at {@code start}.
      */
     public static Action buildAuto(TrajectoryActionBuilder builder, Pose2d start) {
         Pose2d shoot = shootPose(start);
         Pose2d tucked = afterLeftPose(start);
         Pose2d park = parkPose(start);
+        Pose2d fullPark = fullParkPose(start);
         builder = append(builder, start, shoot.position, shoot.heading.toDouble());
         builder = builder.waitSeconds(shootSeconds());
         builder = append(builder, shoot, tucked.position, tucked.heading.toDouble());
         builder = append(builder, tucked, park.position, park.heading.toDouble());
+        builder = append(builder, park, fullPark.position, fullPark.heading.toDouble());
         return builder.build();
     }
 

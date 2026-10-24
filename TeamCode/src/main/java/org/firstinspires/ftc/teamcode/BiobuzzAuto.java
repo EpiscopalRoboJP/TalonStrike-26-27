@@ -57,9 +57,10 @@ public class BiobuzzAuto extends LinearOpMode {
     private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
     private static final double FLYWHEEL_VOLTAGE_MID = 12.6;
     private static final double FLYWHEEL_VOLTAGE_LOW = 12.3;
-    private static final double FLYWHEEL_POWER_HIGH = 0.55;
-    private static final double FLYWHEEL_POWER_MID = 0.6;
-    private static final double FLYWHEEL_POWER_LOW = 0.65;
+    private static final double FLYWHEEL_POWER_MOD = 0.0;
+    private static final double FLYWHEEL_POWER_HIGH = 0.55 + FLYWHEEL_POWER_MOD;
+    private static final double FLYWHEEL_POWER_MID = 0.6 + FLYWHEEL_POWER_MOD;
+    private static final double FLYWHEEL_POWER_LOW = 0.65 + FLYWHEEL_POWER_MOD;
 
     private static final double SHOOT_CUTOFF_SECONDS = 24.0;
 
@@ -87,7 +88,8 @@ public class BiobuzzAuto extends LinearOpMode {
                         driveTo(AutoProfile.shootPose(), "approach", false),
                         shoot(),
                         driveTo(AutoProfile.afterLeftPose(), "park", false),
-                        driveTo(AutoProfile.parkPose(), "park", true)
+                        driveTo(AutoProfile.parkPose(), "park", false),
+                        driveTo(AutoProfile.fullParkPose(), "park", true)
                 )
         ));
 
