@@ -1,5 +1,9 @@
 package org.firstinspires.ftc.teamcode;
 
+import com.acmerobotics.roadrunner.Pose2d;
+import com.acmerobotics.roadrunner.PoseVelocity2d;
+import com.acmerobotics.roadrunner.Vector2d;
+import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -9,6 +13,8 @@ import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 /**
  * Teleop for GoBilda mecanum drive with a continuous-rotation intake.
+ * Gamepad 1 X toggles shooting defense: slower drive, finer aim, and an
+ * odometry hold that drives back to the last commanded pose when the sticks are released.
  */
 @TeleOp(name = "BiobuzzTeleop", group = "TeamCode")
 public class BiobuzzTeleop extends LinearOpMode {
@@ -33,6 +39,17 @@ public class BiobuzzTeleop extends LinearOpMode {
     private double turn;
     private double batteryVoltage;
 
+    private ThreeDeadWheelLocalizer localizer;
+    private Pose2d currentPose = new Pose2d(0, 0, 0);
+    private PoseVelocity2d currentVel = new PoseVelocity2d(new Vector2d(0, 0), 0);
+    private Pose2d holdPose = new Pose2d(0, 0, 0);
+    private boolean defenseMode;
+    private boolean prevXButton;
+    private boolean holdingPosition;
+    private double holdErrorX;
+    private double holdErrorY;
+    private double holdErrorHeading;
+
     private boolean rampPosition;
     private boolean rampLatchedUp;
     private boolean prevBButton;
@@ -41,6 +58,20 @@ public class BiobuzzTeleop extends LinearOpMode {
 
     private static final double JOYSTICK_DEADZONE = 0.05;
     private static final double AIM_TURN_POWER = 0.08;
+    private static final double DEFENSE_TRANSLATION_SCALE = 0.4;
+    private static final double DEFENSE_TURN_SCALE = 0.35;
+    private static final double DEFENSE_AIM_TURN_POWER = 0.1;
+    private static final double DEFENSE_NUDGE_DRIVE_POWER = 0.12;
+    private static final double HOLD_POS_DEADBAND_IN = 0.35;
+    private static final double HOLD_HEADING_DEADBAND_RAD = Math.toRadians(1.5);
+    private static final double HOLD_KP_TRANSLATION = 0.22;
+    private static final double HOLD_KP_STRAFE = 0.25;
+    private static final double HOLD_KP_HEADING = 2.5;
+    private static final double HOLD_KD_TRANSLATION = 0.02;
+    private static final double HOLD_KD_STRAFE = 0.02;
+    private static final double HOLD_KD_HEADING = 0.12;
+    private static final double HOLD_MAX_POWER = 0.85;
+    private static final double HOLD_MIN_POWER = 0.08;
     private static final double RAMP_RANGE_DEGREES = 300.0;
     private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
@@ -63,7 +94,9 @@ public class BiobuzzTeleop extends LinearOpMode {
         waitForStart();
 
         while (opModeIsActive()) {
+            updateOdometry();
             getGamepadInputs();
+            applyPositionHold();
             calculateMecanumDrive();
             setMotorPowers();
             updateServoPositions();
@@ -74,6 +107,10 @@ public class BiobuzzTeleop extends LinearOpMode {
     }
 
     private void initHardware() {
+        for (LynxModule module : hardwareMap.getAll(LynxModule.class)) {
+            module.setBulkCachingMode(LynxModule.BulkCachingMode.AUTO);
+        }
+
         frontLeftMotor = hardwareMap.get(DcMotor.class, "FL");
         frontRightMotor = hardwareMap.get(DcMotor.class, "FR");
         backLeftMotor = hardwareMap.get(DcMotor.class, "BL");
@@ -104,6 +141,10 @@ public class BiobuzzTeleop extends LinearOpMode {
 
         ramp.setPosition(RAMP_DOWN_POSITION);
         stopActuators();
+
+        localizer = new ThreeDeadWheelLocalizer(hardwareMap, MecanumDrive.PARAMS.inPerTick, new Pose2d(0, 0, 0));
+        updateOdometry();
+        holdPose = currentPose;
     }
 
     private void getGamepadInputs() {
@@ -113,10 +154,33 @@ public class BiobuzzTeleop extends LinearOpMode {
         drive = leftStickY;
         strafe = leftStickX;
         turn = -rightStickX;
+
+        if (gamepad1.x && !prevXButton) {
+            defenseMode = !defenseMode;
+            if (defenseMode) {
+                holdPose = currentPose;
+            }
+        }
+        prevXButton = gamepad1.x;
+
+        if (defenseMode) {
+            drive *= DEFENSE_TRANSLATION_SCALE;
+            strafe *= DEFENSE_TRANSLATION_SCALE;
+            turn *= DEFENSE_TURN_SCALE;
+        }
+
+        double aimPower = defenseMode ? DEFENSE_AIM_TURN_POWER : AIM_TURN_POWER;
         if (gamepad1.dpad_left && !gamepad1.dpad_right) {
-            turn += AIM_TURN_POWER;
+            turn += aimPower;
         } else if (gamepad1.dpad_right && !gamepad1.dpad_left) {
-            turn -= AIM_TURN_POWER;
+            turn -= aimPower;
+        }
+        if (defenseMode) {
+            if (gamepad1.dpad_up && !gamepad1.dpad_down) {
+                drive -= DEFENSE_NUDGE_DRIVE_POWER;
+            } else if (gamepad1.dpad_down && !gamepad1.dpad_up) {
+                drive += DEFENSE_NUDGE_DRIVE_POWER;
+            }
         }
 
         if (gamepad2.dpad_down && !prevDpadDown) {
@@ -188,6 +252,78 @@ public class BiobuzzTeleop extends LinearOpMode {
         return sign * Math.pow(absInput, 4);
     }
 
+    private void updateOdometry() {
+        currentVel = localizer.update();
+        currentPose = localizer.getPose();
+    }
+
+    /**
+     * While defense mode is on and the driver has released the sticks, drive back
+     * to holdPose. Robot +x is forward and +y is left; teleop forward is negative drive
+     * and teleop right is positive strafe.
+     */
+    private void applyPositionHold() {
+        if (!defenseMode) {
+            holdingPosition = false;
+            holdErrorX = 0.0;
+            holdErrorY = 0.0;
+            holdErrorHeading = 0.0;
+            return;
+        }
+
+        boolean driverCommanding = Math.abs(drive) > 1e-4
+                || Math.abs(strafe) > 1e-4
+                || Math.abs(turn) > 1e-4;
+        if (driverCommanding) {
+            holdPose = currentPose;
+            holdingPosition = false;
+            holdErrorX = 0.0;
+            holdErrorY = 0.0;
+            holdErrorHeading = 0.0;
+            return;
+        }
+
+        holdingPosition = true;
+        Pose2d error = holdPose.minusExp(currentPose);
+        holdErrorX = error.position.x;
+        holdErrorY = error.position.y;
+        holdErrorHeading = error.heading.toDouble();
+
+        double forwardCmd = 0.0;
+        double leftCmd = 0.0;
+        double turnCmd = 0.0;
+        if (Math.abs(holdErrorX) >= HOLD_POS_DEADBAND_IN) {
+            forwardCmd = HOLD_KP_TRANSLATION * holdErrorX - HOLD_KD_TRANSLATION * currentVel.linearVel.x;
+            forwardCmd = withHoldMinPower(forwardCmd, holdErrorX);
+        }
+        if (Math.abs(holdErrorY) >= HOLD_POS_DEADBAND_IN) {
+            leftCmd = HOLD_KP_STRAFE * holdErrorY - HOLD_KD_STRAFE * currentVel.linearVel.y;
+            leftCmd = withHoldMinPower(leftCmd, holdErrorY);
+        }
+        if (Math.abs(holdErrorHeading) >= HOLD_HEADING_DEADBAND_RAD) {
+            turnCmd = HOLD_KP_HEADING * holdErrorHeading - HOLD_KD_HEADING * currentVel.angVel;
+            turnCmd = withHoldMinPower(turnCmd, holdErrorHeading);
+        }
+
+        drive = clamp(-forwardCmd, -HOLD_MAX_POWER, HOLD_MAX_POWER);
+        strafe = clamp(-leftCmd, -HOLD_MAX_POWER, HOLD_MAX_POWER);
+        turn = clamp(turnCmd, -HOLD_MAX_POWER, HOLD_MAX_POWER);
+    }
+
+    private double withHoldMinPower(double command, double error) {
+        if (command * error < 0.0) {
+            return command;
+        }
+        if (Math.abs(command) < HOLD_MIN_POWER) {
+            return Math.copySign(HOLD_MIN_POWER, error);
+        }
+        return command;
+    }
+
+    private double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
     private void calculateMecanumDrive() {
         frontLeftPower = drive - strafe + turn;
         frontRightPower = drive - strafe - turn;
@@ -235,6 +371,17 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addData("Drive", "%.2f", drive);
         telemetry.addData("Strafe", "%.2f", strafe);
         telemetry.addData("Turn", "%.2f", turn);
+        if (!defenseMode) {
+            telemetry.addData("Defense mode", "off");
+        } else if (holdingPosition) {
+            telemetry.addData("Defense mode", "ACTIVE (HOLDING)");
+        } else {
+            telemetry.addData("Defense mode", "ACTIVE (ADJUSTING)");
+        }
+        if (defenseMode) {
+            telemetry.addData("Hold error", "x %.2f in  y %.2f in  h %.1f deg",
+                    holdErrorX, holdErrorY, Math.toDegrees(holdErrorHeading));
+        }
         telemetry.addData("Intake", "%.2f", intakePower);
         telemetry.addData("Launch mode", nectarMode ? "nectar" : "pollen");
         telemetry.addData("Battery", "%.2f V", batteryVoltage);
@@ -252,6 +399,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addLine("GP1 left stick: drive / strafe");
         telemetry.addLine("GP1 right stick: turn");
         telemetry.addLine("GP1 dpad left / right: minor aim");
+        telemetry.addLine("GP1 dpad up / down: fine drive in defense");
+        telemetry.addLine("GP1 X: toggle shooting defense mode");
         telemetry.addLine("GP2 left stick: intake");
         telemetry.addLine("GP2 right stick: launcher");
         telemetry.addLine("GP2 dpad down: pollen / nectar");
