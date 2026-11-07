@@ -1,0 +1,12 @@
+{
+  "width": 640,
+  "height": 480,
+  "hsv_low": [15, 15, 180],
+  "hsv_high": [40, 255, 255],
+  "blur_size": 0,
+  "close_size": 21,
+  "min_area_fraction": 0.003,
+  "min_circularity": 0.38,
+  "front": {"name": "front", "x": 0.18, "y": 0.0, "w": 0.45, "h": 0.08},
+  "storage": {"name": "storage", "x": 0.0, "y": 0.08, "w": 1.0, "h": 0.92}
+}
