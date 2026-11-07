@@ -8,13 +8,18 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
+
+import org.firstinspires.ftc.teamcode.vision.PollenCamera;
+import org.firstinspires.ftc.teamcode.vision.PollenVisionResult;
 
 /**
  * Teleop for GoBilda mecanum drive with a continuous-rotation intake.
  * Gamepad 1 X toggles shooting defense: slower drive, finer aim, and an
  * odometry hold that drives back to the last commanded pose when the sticks are released.
+ * The top RGB indicator is a Servo named "RGB". The pollen webcam is optional.
  */
 @TeleOp(name = "BiobuzzTeleop", group = "TeamCode")
 public class BiobuzzTeleop extends LinearOpMode {
@@ -48,6 +53,7 @@ public class BiobuzzTeleop extends LinearOpMode {
     private boolean defenseMode;
     private boolean prevXButton;
     private boolean holdingPosition;
+    private boolean fighting;
     private double holdErrorX;
     private double holdErrorY;
     private double holdErrorHeading;
@@ -57,6 +63,8 @@ public class BiobuzzTeleop extends LinearOpMode {
     private boolean prevBButton;
     private boolean prevDpadLeft;
     private boolean nectarMode;
+    private RgbIndicator indicator;
+    private PollenCamera pollenCamera;
 
     private static final double JOYSTICK_DEADZONE = 0.05;
     private static final double AIM_TURN_POWER = 0.08;
@@ -74,6 +82,12 @@ public class BiobuzzTeleop extends LinearOpMode {
     private static final double HOLD_KD_HEADING = 0.12;
     private static final double HOLD_MAX_POWER = 0.85;
     private static final double HOLD_MIN_POWER = 0.08;
+    private static final double HOLD_PUSH_SPEED_IN_PER_S = 6.0;
+    private static final double HOLD_PUSH_TURN_RAD_PER_S = 0.5;
+    private static final double HOLD_FIGHT_KP_SCALE = 2.2;
+    private static final double HOLD_FIGHT_KD_SCALE = 4.0;
+    private static final double HOLD_FIGHT_MAX_POWER = 1.0;
+    private static final double HOLD_FIGHT_MIN_POWER = 0.28;
     private static final double RAMP_RANGE_DEGREES = 300.0;
     private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
@@ -91,22 +105,29 @@ public class BiobuzzTeleop extends LinearOpMode {
     public void runOpMode() {
         initHardware();
 
-        telemetry.addData("Status", "Initialized");
-        telemetry.update();
+        try {
+            telemetry.addData("Status", "Initialized");
+            telemetry.update();
 
-        waitForStart();
+            waitForStart();
 
-        while (opModeIsActive()) {
-            updateOdometry();
-            getGamepadInputs();
-            applyPositionHold();
-            calculateMecanumDrive();
-            setMotorPowers();
-            updateServoPositions();
-            updateTelemetry();
+            while (opModeIsActive()) {
+                updateOdometry();
+                getGamepadInputs();
+                applyPositionHold();
+                calculateMecanumDrive();
+                setMotorPowers();
+                updateServoPositions();
+                updateIndicator();
+                updateTelemetry();
+            }
+        } finally {
+            stopActuators();
+            if (pollenCamera != null) {
+                pollenCamera.close();
+                pollenCamera = null;
+            }
         }
-
-        stopActuators();
     }
 
     private void initHardware() {
@@ -119,6 +140,7 @@ public class BiobuzzTeleop extends LinearOpMode {
         backLeftMotor = hardwareMap.get(DcMotor.class, "BL");
         backRightMotor = hardwareMap.get(DcMotor.class, "BR");
         intake = hardwareMap.get(CRServo.class, "Intake");
+        intake.setDirection(DcMotorSimple.Direction.REVERSE);
         laucher = hardwareMap.get(DcMotor.class, "Laucher");
         ramp = hardwareMap.get(Servo.class, "Ramp");
         gate = hardwareMap.get(CRServo.class, "Gate");
@@ -150,6 +172,9 @@ public class BiobuzzTeleop extends LinearOpMode {
         localizer = new ThreeDeadWheelLocalizer(hardwareMap, MecanumDrive.PARAMS.inPerTick, new Pose2d(0, 0, 0));
         updateOdometry();
         holdPose = currentPose;
+
+        indicator = RgbIndicator.attach(hardwareMap);
+        pollenCamera = PollenCamera.openIfConfigured(hardwareMap);
     }
 
     private void getGamepadInputs() {
@@ -279,10 +304,7 @@ public class BiobuzzTeleop extends LinearOpMode {
      */
     private void applyPositionHold() {
         if (!defenseMode) {
-            holdingPosition = false;
-            holdErrorX = 0.0;
-            holdErrorY = 0.0;
-            holdErrorHeading = 0.0;
+            clearHold();
             return;
         }
 
@@ -291,10 +313,7 @@ public class BiobuzzTeleop extends LinearOpMode {
                 || Math.abs(turn) > 1e-4;
         if (driverCommanding) {
             holdPose = currentPose;
-            holdingPosition = false;
-            holdErrorX = 0.0;
-            holdErrorY = 0.0;
-            holdErrorHeading = 0.0;
+            clearHold();
             return;
         }
 
@@ -304,33 +323,76 @@ public class BiobuzzTeleop extends LinearOpMode {
         holdErrorY = error.position.y;
         holdErrorHeading = error.heading.toDouble();
 
-        double forwardCmd = 0.0;
-        double leftCmd = 0.0;
-        double turnCmd = 0.0;
-        if (Math.abs(holdErrorX) >= HOLD_POS_DEADBAND_IN) {
-            forwardCmd = HOLD_KP_TRANSLATION * holdErrorX - HOLD_KD_TRANSLATION * currentVel.linearVel.x;
-            forwardCmd = withHoldMinPower(forwardCmd, holdErrorX);
-        }
-        if (Math.abs(holdErrorY) >= HOLD_POS_DEADBAND_IN) {
-            leftCmd = HOLD_KP_STRAFE * holdErrorY - HOLD_KD_STRAFE * currentVel.linearVel.y;
-            leftCmd = withHoldMinPower(leftCmd, holdErrorY);
-        }
-        if (Math.abs(holdErrorHeading) >= HOLD_HEADING_DEADBAND_RAD) {
-            turnCmd = HOLD_KP_HEADING * holdErrorHeading - HOLD_KD_HEADING * currentVel.angVel;
-            turnCmd = withHoldMinPower(turnCmd, holdErrorHeading);
-        }
+        boolean fightX = axisPushed(
+                holdErrorX, currentVel.linearVel.x, HOLD_POS_DEADBAND_IN, HOLD_PUSH_SPEED_IN_PER_S);
+        boolean fightY = axisPushed(
+                holdErrorY, currentVel.linearVel.y, HOLD_POS_DEADBAND_IN, HOLD_PUSH_SPEED_IN_PER_S);
+        boolean fightHeading = axisPushed(
+                holdErrorHeading, currentVel.angVel, HOLD_HEADING_DEADBAND_RAD, HOLD_PUSH_TURN_RAD_PER_S);
+        fighting = fightX || fightY || fightHeading;
+        double maxPower = fighting ? HOLD_FIGHT_MAX_POWER : HOLD_MAX_POWER;
 
-        drive = clamp(-forwardCmd, -HOLD_MAX_POWER, HOLD_MAX_POWER);
-        strafe = clamp(-leftCmd, -HOLD_MAX_POWER, HOLD_MAX_POWER);
-        turn = clamp(turnCmd, -HOLD_MAX_POWER, HOLD_MAX_POWER);
+        double forwardCmd = holdAxis(
+                holdErrorX, currentVel.linearVel.x, HOLD_POS_DEADBAND_IN, fightX,
+                HOLD_KP_TRANSLATION, HOLD_KD_TRANSLATION);
+        double leftCmd = holdAxis(
+                holdErrorY, currentVel.linearVel.y, HOLD_POS_DEADBAND_IN, fightY,
+                HOLD_KP_STRAFE, HOLD_KD_STRAFE);
+        double turnCmd = holdAxis(
+                holdErrorHeading, currentVel.angVel, HOLD_HEADING_DEADBAND_RAD, fightHeading,
+                HOLD_KP_HEADING, HOLD_KD_HEADING);
+
+        drive = clamp(-forwardCmd, -maxPower, maxPower);
+        strafe = clamp(-leftCmd, -maxPower, maxPower);
+        turn = clamp(turnCmd, -maxPower, maxPower);
     }
 
-    private double withHoldMinPower(double command, double error) {
-        if (command * error < 0.0) {
+    private void clearHold() {
+        holdingPosition = false;
+        fighting = false;
+        holdErrorX = 0.0;
+        holdErrorY = 0.0;
+        holdErrorHeading = 0.0;
+    }
+
+    /**
+     * True when this axis is moving while the hold should be still, or moving
+     * so the pose error is growing. That is another robot pushing.
+     */
+    private boolean axisPushed(double error, double velocity, double deadband, double speed) {
+        if (Math.abs(velocity) < speed) {
+            return false;
+        }
+        if (Math.abs(error) < deadband) {
+            return true;
+        }
+        return error * velocity < 0.0;
+    }
+
+    private double holdAxis(
+            double error,
+            double velocity,
+            double deadband,
+            boolean fight,
+            double kp,
+            double kd) {
+        if (Math.abs(error) < deadband && !fight) {
+            return 0.0;
+        }
+        double commandKp = fight ? kp * HOLD_FIGHT_KP_SCALE : kp;
+        double commandKd = fight ? kd * HOLD_FIGHT_KD_SCALE : kd;
+        double command = commandKp * error - commandKd * velocity;
+        double minPower = fight ? HOLD_FIGHT_MIN_POWER : HOLD_MIN_POWER;
+        double signSource = Math.abs(error) >= deadband ? error : -velocity;
+        return withHoldMinPower(command, signSource, minPower);
+    }
+
+    private double withHoldMinPower(double command, double signSource, double minPower) {
+        if (command * signSource < 0.0) {
             return command;
         }
-        if (Math.abs(command) < HOLD_MIN_POWER) {
-            return Math.copySign(HOLD_MIN_POWER, error);
+        if (Math.abs(command) < minPower && signSource != 0.0) {
+            return Math.copySign(minPower, signSource);
         }
         return command;
     }
@@ -372,17 +434,55 @@ public class BiobuzzTeleop extends LinearOpMode {
         javelin.setPower(javelinPower);
     }
 
+    private void updateIndicator() {
+        boolean ballReading = pollenCamera != null && pollenCamera.hasReading();
+        int frontCount = 0;
+        int storageCount = 0;
+        if (ballReading) {
+            PollenVisionResult result = pollenCamera.result();
+            frontCount = result.frontCount;
+            storageCount = result.storageCount;
+        }
+        indicator.update(
+                fighting,
+                nectarMode,
+                holdingPosition,
+                batteryVoltage <= FLYWHEEL_VOLTAGE_LOW,
+                ballReading,
+                frontCount,
+                storageCount);
+    }
+
     private void stopActuators() {
-        frontLeftMotor.setPower(0);
-        frontRightMotor.setPower(0);
-        backLeftMotor.setPower(0);
-        backRightMotor.setPower(0);
-        intake.setPower(0);
-        laucher.setPower(0);
+        if (frontLeftMotor != null) {
+            frontLeftMotor.setPower(0);
+        }
+        if (frontRightMotor != null) {
+            frontRightMotor.setPower(0);
+        }
+        if (backLeftMotor != null) {
+            backLeftMotor.setPower(0);
+        }
+        if (backRightMotor != null) {
+            backRightMotor.setPower(0);
+        }
+        if (intake != null) {
+            intake.setPower(0);
+        }
+        if (laucher != null) {
+            laucher.setPower(0);
+        }
         javelinPower = 0.0;
-        javelin.setPower(0);
+        if (javelin != null) {
+            javelin.setPower(0);
+        }
         gatePower = 0.0;
-        gate.setPower(0);
+        if (gate != null) {
+            gate.setPower(0);
+        }
+        if (indicator != null) {
+            indicator.off();
+        }
     }
 
     private void updateTelemetry() {
@@ -391,6 +491,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addData("Turn", "%.2f", turn);
         if (!defenseMode) {
             telemetry.addData("Defense mode", "off");
+        } else if (fighting) {
+            telemetry.addData("Defense mode", "ACTIVE (FIGHTING)");
         } else if (holdingPosition) {
             telemetry.addData("Defense mode", "ACTIVE (HOLDING)");
         } else {
@@ -403,6 +505,15 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addData("Intake", "%.2f", intakePower);
         telemetry.addData("Launch mode", nectarMode ? "nectar" : "pollen");
         telemetry.addData("Battery", "%.2f V", batteryVoltage);
+        telemetry.addData("Light", indicator.label());
+        if (pollenCamera == null) {
+            telemetry.addData("Balls", "camera not configured");
+        } else if (!pollenCamera.hasReading()) {
+            telemetry.addData("Balls", "waiting for camera");
+        } else {
+            PollenVisionResult balls = pollenCamera.result();
+            telemetry.addData("Balls", "front %d  storage %d", balls.frontCount, balls.storageCount);
+        }
         telemetry.addData("Laucher", "%.2f", laucherPower);
         telemetry.addData("Ramp", rampPosition ? "up 180 deg" : "down 90 deg");
         if (gatePower > 0.0) {
@@ -435,6 +546,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addLine("GP2 B: toggle ramp up or down");
         telemetry.addLine("GP2 left bumper: hold to retract javelin");
         telemetry.addLine("GP2 right bumper: hold to deploy javelin");
+        telemetry.addLine("Light: purple nectar, orange blink defense hold, rainbow while pushed");
+        telemetry.addLine("Light balls: green front, yellow storage, red empty");
         telemetry.update();
     }
 }

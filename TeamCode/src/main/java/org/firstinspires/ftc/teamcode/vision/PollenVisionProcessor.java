@@ -15,6 +15,7 @@ public class PollenVisionProcessor implements VisionProcessor {
     private volatile PollenVisionResult result = PollenVisionResult.empty();
     private volatile String error;
     private volatile boolean showMask;
+    private volatile boolean sawFrame;
 
     public PollenVisionProcessor(PollenVisionConfig config) {
         detector = new PollenDetector(config);
@@ -36,6 +37,14 @@ public class PollenVisionProcessor implements VisionProcessor {
         return error;
     }
 
+    /**
+     * True after at least one frame has been counted and the latest frame did not throw.
+     * An empty count is a real reading. A missing camera is not.
+     */
+    public boolean hasReading() {
+        return sawFrame && error == null;
+    }
+
     @Override
     public void init(int width, int height, CameraCalibration calibration) {
     }
@@ -45,6 +54,7 @@ public class PollenVisionProcessor implements VisionProcessor {
         try {
             result = detector.process(frame, showMask);
             error = null;
+            sawFrame = true;
         } catch (RuntimeException exception) {
             error = exception.getClass().getSimpleName() + ": " + exception.getMessage();
         }

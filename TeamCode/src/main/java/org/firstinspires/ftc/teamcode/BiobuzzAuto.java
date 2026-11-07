@@ -14,6 +14,7 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
@@ -98,6 +99,7 @@ public class BiobuzzAuto extends LinearOpMode {
 
     private void initHardware() {
         intake = hardwareMap.get(CRServo.class, "Intake");
+        intake.setDirection(DcMotorSimple.Direction.REVERSE);
         laucher = hardwareMap.get(DcMotor.class, "Laucher");
         ramp = hardwareMap.get(Servo.class, "Ramp");
         javelin = hardwareMap.get(CRServo.class, "Javelin");
