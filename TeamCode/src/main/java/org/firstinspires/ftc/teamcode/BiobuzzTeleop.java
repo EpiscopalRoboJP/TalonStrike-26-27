@@ -25,6 +25,7 @@ public class BiobuzzTeleop extends LinearOpMode {
     private CRServo intake;
     private DcMotor laucher;
     private Servo ramp;
+    private CRServo gate;
     private CRServo javelin;
 
     private double frontLeftPower;
@@ -34,6 +35,7 @@ public class BiobuzzTeleop extends LinearOpMode {
     private double intakePower;
     private double laucherPower;
     private double javelinPower;
+    private double gatePower;
     private double drive;
     private double strafe;
     private double turn;
@@ -53,8 +55,8 @@ public class BiobuzzTeleop extends LinearOpMode {
     private boolean rampPosition;
     private boolean rampLatchedUp;
     private boolean prevBButton;
+    private boolean prevDpadLeft;
     private boolean nectarMode;
-    private boolean prevDpadDown;
 
     private static final double JOYSTICK_DEADZONE = 0.05;
     private static final double AIM_TURN_POWER = 0.08;
@@ -76,6 +78,7 @@ public class BiobuzzTeleop extends LinearOpMode {
     private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
     private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
     private static final double JAVELIN_POWER = 1.0;
+    private static final double GATE_POWER = 0.5;
     private static final double NECTAR_MAX_POWER = 1.0;
     private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
     private static final double FLYWHEEL_VOLTAGE_MID = 12.6;
@@ -118,6 +121,7 @@ public class BiobuzzTeleop extends LinearOpMode {
         intake = hardwareMap.get(CRServo.class, "Intake");
         laucher = hardwareMap.get(DcMotor.class, "Laucher");
         ramp = hardwareMap.get(Servo.class, "Ramp");
+        gate = hardwareMap.get(CRServo.class, "Gate");
         javelin = hardwareMap.get(CRServo.class, "Javelin");
 
         frontLeftMotor.setDirection(DcMotor.Direction.REVERSE);
@@ -140,6 +144,7 @@ public class BiobuzzTeleop extends LinearOpMode {
         laucher.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
         ramp.setPosition(RAMP_DOWN_POSITION);
+        gate.setPower(0);
         stopActuators();
 
         localizer = new ThreeDeadWheelLocalizer(hardwareMap, MecanumDrive.PARAMS.inPerTick, new Pose2d(0, 0, 0));
@@ -183,10 +188,10 @@ public class BiobuzzTeleop extends LinearOpMode {
             }
         }
 
-        if (gamepad2.dpad_down && !prevDpadDown) {
+        if (gamepad2.dpad_left && !prevDpadLeft) {
             nectarMode = !nectarMode;
         }
-        prevDpadDown = gamepad2.dpad_down;
+        prevDpadLeft = gamepad2.dpad_left;
 
         double launcherCap = nectarMode ? NECTAR_MAX_POWER : flywheelPowerForVoltage(readBatteryVoltage());
         laucherPower = launcherCap * joystickExponentialCurve(deadzone(gamepad2.right_stick_y));
@@ -199,6 +204,16 @@ public class BiobuzzTeleop extends LinearOpMode {
 
         boolean rampHeldUp = gamepad2.a && intakePower == 0.0;
         rampPosition = rampHeldUp || rampLatchedUp;
+
+        boolean gateForward = gamepad2.dpad_up;
+        boolean gateBack = gamepad2.dpad_down;
+        if (gateForward && !gateBack) {
+            gatePower = GATE_POWER;
+        } else if (gateBack && !gateForward) {
+            gatePower = -GATE_POWER;
+        } else {
+            gatePower = 0.0;
+        }
 
         boolean retractHeld = gamepad2.left_bumper;
         boolean deployHeld = gamepad2.right_bumper;
@@ -353,6 +368,7 @@ public class BiobuzzTeleop extends LinearOpMode {
 
     private void updateServoPositions() {
         ramp.setPosition(rampPosition ? RAMP_UP_POSITION : RAMP_DOWN_POSITION);
+        gate.setPower(gatePower);
         javelin.setPower(javelinPower);
     }
 
@@ -365,6 +381,8 @@ public class BiobuzzTeleop extends LinearOpMode {
         laucher.setPower(0);
         javelinPower = 0.0;
         javelin.setPower(0);
+        gatePower = 0.0;
+        gate.setPower(0);
     }
 
     private void updateTelemetry() {
@@ -387,6 +405,13 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addData("Battery", "%.2f V", batteryVoltage);
         telemetry.addData("Laucher", "%.2f", laucherPower);
         telemetry.addData("Ramp", rampPosition ? "up 180 deg" : "down 90 deg");
+        if (gatePower > 0.0) {
+            telemetry.addData("Gate", "forward %.2f", GATE_POWER);
+        } else if (gatePower < 0.0) {
+            telemetry.addData("Gate", "back %.2f", GATE_POWER);
+        } else {
+            telemetry.addData("Gate", "stopped");
+        }
         if (javelinPower > 0.0) {
             telemetry.addData("Javelin", "retracting");
         } else if (javelinPower < 0.0) {
@@ -403,7 +428,9 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addLine("GP1 X: toggle shooting defense mode");
         telemetry.addLine("GP2 left stick: intake");
         telemetry.addLine("GP2 right stick: launcher");
-        telemetry.addLine("GP2 dpad down: pollen / nectar");
+        telemetry.addLine("GP2 dpad up: gate forward");
+        telemetry.addLine("GP2 dpad down: gate back");
+        telemetry.addLine("GP2 dpad left: pollen / nectar");
         telemetry.addLine("GP2 A: hold ramp up while intake is stopped");
         telemetry.addLine("GP2 B: toggle ramp up or down");
         telemetry.addLine("GP2 left bumper: hold to retract javelin");
