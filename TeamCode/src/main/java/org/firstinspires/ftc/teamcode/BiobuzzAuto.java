@@ -14,6 +14,7 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
@@ -29,19 +30,26 @@ import static com.acmerobotics.roadrunner.Actions.now;
  * Place the robot on the red side, touching the audience wall, facing away from
  * the audience. The route and drive limits live in AutoProfile, which MeepMeep reads too.
  * The preload is 4 pollen, so the launcher stays on BiobuzzTeleop's pollen curve
- * for the whole auto and stops only when the routine ends. The javelin stroke matches teleop.
+ * for the whole auto and stops only when the routine ends. RGB and RGB2 follow
+ * teleop: purple while the launcher spins, green while the intake runs, yellow
+ * while a wheel is commanded, and green on RGB2 once the encoder holds shoot speed.
+ * The javelin stroke matches teleop.
  * Feedforward and dead-wheel geometry in MecanumDrive.PARAMS are still placeholders
  * until the tuning opmodes have been run.
  */
 @Autonomous(name = "BiobuzzAuto", group = "TeamCode", preselectTeleOp = "BiobuzzTeleop")
 public class BiobuzzAuto extends LinearOpMode {
-    private DcMotor laucher;
+    private DcMotorEx laucher;
     private CRServo intake;
     private CRServo javelin;
     private MecanumDrive drive;
+    private RgbIndicator indicator;
 
     private String stage = "init";
     private final ElapsedTime autoTimer = new ElapsedTime();
+    private double launcherTicksPerSec;
+    private double launcherPeakTicksPerSec;
+    private long launcherPeakMs;
 
     // Full deploy stroke from BiobuzzTeleop. Longer than this stalls the servo at the stop.
     private static final double JAVELIN_RUN_SECONDS = 13.0;
@@ -60,12 +68,20 @@ public class BiobuzzAuto extends LinearOpMode {
 
     private static final double SHOOT_CUTOFF_SECONDS = 24.0;
 
+    private static final double MOVE_COMMAND = 0.02;
+    private static final double LAUNCHER_READY_FRACTION = 0.97;
+    private static final double LAUNCHER_MOVE_TICKS_PER_SEC = 40.0;
+    private static final double LAUNCHER_MIN_TICKS_PER_SEC = 100.0;
+    private static final double LAUNCHER_SPEED_HOLD = 0.92;
+    private static final long LAUNCHER_SETTLE_MS = 150;
+
     @Override
     public void runOpMode() {
         initHardware();
 
         while (opModeInInit()) {
             drive.updatePoseEstimate();
+            updateIndicator();
             updateTelemetry();
         }
 
@@ -95,14 +111,16 @@ public class BiobuzzAuto extends LinearOpMode {
     private void initHardware() {
         intake = hardwareMap.get(CRServo.class, "Intake");
         intake.setDirection(DcMotorSimple.Direction.REVERSE);
-        laucher = hardwareMap.get(DcMotor.class, "Laucher");
+        laucher = hardwareMap.get(DcMotorEx.class, "Laucher");
         javelin = hardwareMap.get(CRServo.class, "Javelin");
         drive = new MecanumDrive(hardwareMap, AutoProfile.START);
 
         laucher.setDirection(DcMotor.Direction.FORWARD);
         laucher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        // Power stays open-loop. The encoder is read for speed only.
         laucher.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
+        indicator = RgbIndicator.attach(hardwareMap);
         stopActuators();
     }
 
@@ -121,6 +139,7 @@ public class BiobuzzAuto extends LinearOpMode {
                 if (!running && endsPark) {
                     stage = "parked";
                 }
+                updateIndicator();
                 updateTelemetry();
                 return running;
             }
@@ -162,6 +181,8 @@ public class BiobuzzAuto extends LinearOpMode {
                 laucher.setPower(pollenPower());
                 if (autoTimer.seconds() >= SHOOT_CUTOFF_SECONDS) {
                     intake.setPower(0);
+                    updateIndicator();
+                    updateTelemetry();
                     return false;
                 }
                 if (startedAt < 0) {
@@ -170,6 +191,8 @@ public class BiobuzzAuto extends LinearOpMode {
                 double elapsed = now() - startedAt;
                 if (elapsed >= totalSeconds) {
                     intake.setPower(0);
+                    updateIndicator();
+                    updateTelemetry();
                     return false;
                 }
 
@@ -186,6 +209,7 @@ public class BiobuzzAuto extends LinearOpMode {
                     }
                 }
                 intake.setPower(intakeOn ? INTAKE_FEED_POWER : 0.0);
+                updateIndicator();
                 updateTelemetry();
                 return true;
             }
@@ -197,6 +221,62 @@ public class BiobuzzAuto extends LinearOpMode {
         intake.setPower(0);
         laucher.setPower(0);
         javelin.setPower(0);
+        if (indicator != null) {
+            indicator.off();
+        }
+    }
+
+    private void updateIndicator() {
+        if (indicator == null) {
+            return;
+        }
+        double ticksPerSec = readLauncherTicksPerSec();
+        indicator.update(
+                robotMoving(),
+                Math.abs(intake.getPower()) > MOVE_COMMAND,
+                ticksPerSec >= LAUNCHER_MOVE_TICKS_PER_SEC,
+                false,
+                false,
+                false,
+                launcherAtShootSpeed(ticksPerSec),
+                false);
+    }
+
+    private boolean robotMoving() {
+        return Math.abs(drive.leftFront.getPower()) > MOVE_COMMAND
+                || Math.abs(drive.leftBack.getPower()) > MOVE_COMMAND
+                || Math.abs(drive.rightFront.getPower()) > MOVE_COMMAND
+                || Math.abs(drive.rightBack.getPower()) > MOVE_COMMAND;
+    }
+
+    private double readLauncherTicksPerSec() {
+        if (laucher == null) {
+            launcherTicksPerSec = 0.0;
+            return 0.0;
+        }
+        launcherTicksPerSec = Math.abs(laucher.getVelocity());
+        return launcherTicksPerSec;
+    }
+
+    /**
+     * Green once the encoder stops climbing and holds the speed this pollen power produces.
+     */
+    private boolean launcherAtShootSpeed(double ticksPerSec) {
+        double cap = pollenPower();
+        boolean atCap = cap > 0.0 && Math.abs(laucher.getPower()) >= cap * LAUNCHER_READY_FRACTION;
+        if (!atCap) {
+            launcherPeakTicksPerSec = 0.0;
+            launcherPeakMs = 0L;
+            return false;
+        }
+        long nowMs = System.currentTimeMillis();
+        if (ticksPerSec > launcherPeakTicksPerSec * 1.02) {
+            launcherPeakTicksPerSec = ticksPerSec;
+            launcherPeakMs = nowMs;
+        }
+        return launcherPeakTicksPerSec >= LAUNCHER_MIN_TICKS_PER_SEC
+                && ticksPerSec >= launcherPeakTicksPerSec * LAUNCHER_SPEED_HOLD
+                && nowMs - launcherPeakMs >= LAUNCHER_SETTLE_MS;
     }
 
     private double pollenPower() {
@@ -232,7 +312,10 @@ public class BiobuzzAuto extends LinearOpMode {
         Pose2d pose = drive.localizer.getPose();
         telemetry.addData("Stage", stage);
         telemetry.addData("Auto time", "%.1f s", opModeIsActive() ? autoTimer.seconds() : 0.0);
-        telemetry.addData("Launcher", "%.2f", laucher.getPower());
+        telemetry.addData("Launcher", "%.2f power  %.0f ticks/s", laucher.getPower(), launcherTicksPerSec);
+        telemetry.addData("RGB", "%s", indicator.rgbLabel());
+        telemetry.addData("RGB2", "%s", indicator.rgb2Label());
+        telemetry.addData("Lights", indicator.lightCount());
         telemetry.addData("Pose", "x %.1f in  y %.1f in  h %.1f deg",
                 pose.position.x, pose.position.y, Math.toDegrees(pose.heading.toDouble()));
         telemetry.update();

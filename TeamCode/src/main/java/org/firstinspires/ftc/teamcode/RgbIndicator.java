@@ -12,8 +12,11 @@ import java.util.Random;
  * 0.30-0.70 through red to magenta, and above 0.70 to white.
  *
  * RGB shows what is moving, launcher first, then intake, then drive.
- * RGB2 is red in defense mode, otherwise green once the launcher is at shoot speed.
- * Rainbow mode picks a new color for each light on its own.
+ * RGB2 is red while defense is adjusting, orange blink while holding,
+ * a slow rainbow while being pushed, and green once the launcher is at shoot speed.
+ * Party mode picks a new color for each light on its own.
+ * E108 forbids a bright light that flashes faster than about 5 times a second.
+ * Each light changes at most once every 250 ms, including blinks and rainbow steps.
  */
 public final class RgbIndicator {
     public static final String DEVICE_NAME = "RGB";
@@ -21,13 +24,14 @@ public final class RgbIndicator {
 
     static final double OFF = 0.0;
     static final double RED = 0.33;
+    static final double ORANGE = 0.39;
     static final double YELLOW = 0.45;
     static final double GREEN = 0.50;
     static final double PURPLE = 0.66;
     static final double COLOR_MIN = 0.32;
     static final double COLOR_MAX = 0.69;
 
-    private static final long PARTY_STEP_MS = 180;
+    static final long MIN_CHANGE_MS = 250;
     private static final double PARTY_SEPARATION = 0.06;
 
     private final Servo rgb;
@@ -36,14 +40,21 @@ public final class RgbIndicator {
     private double partyRgb = YELLOW;
     private double partyRgb2 = PURPLE;
     private long nextPartyMs;
+    private long rgbChangedMs;
+    private long rgb2ChangedMs;
+    private double rgbShown = OFF;
+    private double rgb2Shown = OFF;
+    private boolean rgbHasShown;
+    private boolean rgb2HasShown;
     private String rgbLabel = "off";
     private String rgb2Label = "off";
 
     private RgbIndicator(Servo rgb, Servo rgb2) {
         this.rgb = rgb;
         this.rgb2 = rgb2;
-        set(rgb, OFF);
-        set(rgb2, OFF);
+        long now = System.currentTimeMillis();
+        show(rgb, OFF, now, true, true);
+        show(rgb2, OFF, now, false, true);
     }
 
     public static RgbIndicator attach(HardwareMap hardwareMap) {
@@ -66,30 +77,31 @@ public final class RgbIndicator {
             boolean intakeMoving,
             boolean launcherMoving,
             boolean defenseMode,
+            boolean defenseHolding,
+            boolean fighting,
             boolean launcherAtSpeed,
             boolean party) {
+        long now = System.currentTimeMillis();
         if (party) {
-            rollPartyColors();
+            rollPartyColors(now, true);
             rgbLabel = "rainbow";
             rgb2Label = "rainbow";
-            set(rgb, partyRgb);
-            set(rgb2, partyRgb2);
+            show(rgb, partyRgb, now, true, false);
+            show(rgb2, partyRgb2, now, false, false);
             return;
         }
 
-        double rgbPosition = rgbPosition(launcherMoving, intakeMoving, robotMoving);
-        double rgb2Position = rgb2Position(defenseMode, launcherAtSpeed);
         rgbLabel = rgbLabel(launcherMoving, intakeMoving, robotMoving);
-        rgb2Label = rgb2Label(defenseMode, launcherAtSpeed);
-        set(rgb, rgbPosition);
-        set(rgb2, rgb2Position);
+        show(rgb, rgbPosition(launcherMoving, intakeMoving, robotMoving), now, true, false);
+        applyRgb2(defenseMode, defenseHolding, fighting, launcherAtSpeed, now);
     }
 
     public void off() {
+        long now = System.currentTimeMillis();
         rgbLabel = rgb == null ? "not configured" : "off";
         rgb2Label = rgb2 == null ? "not configured" : "off";
-        set(rgb, OFF);
-        set(rgb2, OFF);
+        show(rgb, OFF, now, true, true);
+        show(rgb2, OFF, now, false, true);
     }
 
     public String rgbLabel() {
@@ -113,14 +125,35 @@ public final class RgbIndicator {
         return OFF;
     }
 
-    static double rgb2Position(boolean defenseMode, boolean launcherAtSpeed) {
+    private void applyRgb2(
+            boolean defenseMode,
+            boolean defenseHolding,
+            boolean fighting,
+            boolean launcherAtSpeed,
+            long now) {
+        if (fighting) {
+            rollPartyColors(now, false);
+            rgb2Label = "rainbow fight";
+            show(rgb2, partyRgb2, now, false, false);
+            return;
+        }
+        if (defenseHolding) {
+            rgb2Label = "orange hold";
+            show(rgb2, blinkLit(now) ? ORANGE : OFF, now, false, false);
+            return;
+        }
         if (defenseMode) {
-            return RED;
+            rgb2Label = "red defense";
+            show(rgb2, RED, now, false, false);
+            return;
         }
         if (launcherAtSpeed) {
-            return GREEN;
+            rgb2Label = "green ready";
+            show(rgb2, GREEN, now, false, false);
+            return;
         }
-        return OFF;
+        rgb2Label = "off";
+        show(rgb2, OFF, now, false, false);
     }
 
     private static String rgbLabel(boolean launcherMoving, boolean intakeMoving, boolean robotMoving) {
@@ -136,26 +169,21 @@ public final class RgbIndicator {
         return "off";
     }
 
-    private static String rgb2Label(boolean defenseMode, boolean launcherAtSpeed) {
-        if (defenseMode) {
-            return "red defense";
-        }
-        if (launcherAtSpeed) {
-            return "green ready";
-        }
-        return "off";
+    private static boolean blinkLit(long now) {
+        return (now / MIN_CHANGE_MS) % 2 == 0;
     }
 
-    private void rollPartyColors() {
-        long now = System.currentTimeMillis();
+    private void rollPartyColors(long now, boolean bothLights) {
         if (now < nextPartyMs) {
             return;
         }
-        nextPartyMs = now + PARTY_STEP_MS;
-        partyRgb = randomColor();
+        nextPartyMs = now + MIN_CHANGE_MS;
+        if (bothLights) {
+            partyRgb = randomColor();
+        }
         partyRgb2 = randomColor();
         int guard = 0;
-        while (Math.abs(partyRgb - partyRgb2) < PARTY_SEPARATION && guard < 8) {
+        while (bothLights && Math.abs(partyRgb - partyRgb2) < PARTY_SEPARATION && guard < 8) {
             partyRgb2 = randomColor();
             guard++;
         }
@@ -165,17 +193,39 @@ public final class RgbIndicator {
         return COLOR_MIN + random.nextDouble() * (COLOR_MAX - COLOR_MIN);
     }
 
+    /**
+     * Writes a position only when it differs from what that light is already showing
+     * and at least MIN_CHANGE_MS has passed since its last change. Stop forces off.
+     */
+    private void show(Servo light, double position, long now, boolean firstLight, boolean force) {
+        if (light == null) {
+            return;
+        }
+        boolean hasShown = firstLight ? rgbHasShown : rgb2HasShown;
+        double shown = firstLight ? rgbShown : rgb2Shown;
+        long changedMs = firstLight ? rgbChangedMs : rgb2ChangedMs;
+        if (!force && hasShown && position != shown && now - changedMs < MIN_CHANGE_MS) {
+            return;
+        }
+        if (!hasShown || position != shown) {
+            light.setPosition(position);
+            if (firstLight) {
+                rgbShown = position;
+                rgbChangedMs = now;
+                rgbHasShown = true;
+            } else {
+                rgb2Shown = position;
+                rgb2ChangedMs = now;
+                rgb2HasShown = true;
+            }
+        }
+    }
+
     private static Servo find(HardwareMap hardwareMap, String name) {
         try {
             return hardwareMap.get(Servo.class, name);
         } catch (RuntimeException exception) {
             return null;
-        }
-    }
-
-    private static void set(Servo light, double position) {
-        if (light != null) {
-            light.setPosition(position);
         }
     }
 }

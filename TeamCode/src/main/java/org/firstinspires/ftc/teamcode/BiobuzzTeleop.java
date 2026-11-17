@@ -19,9 +19,10 @@ import org.firstinspires.ftc.teamcode.vision.PollenVisionResult;
  * Teleop for GoBilda mecanum drive with a continuous-rotation intake.
  * Gamepad 1 X toggles shooting defense: slower drive, finer aim, and an
  * odometry hold that drives back to the last commanded pose when the sticks are released.
- * RGB shows drive, intake, and launcher. RGB2 shows defense, or green when the
- * launcher encoder is holding shoot speed. Gamepad 2 dpad right toggles a rainbow
- * on both lights. The pollen webcam is optional.
+ * RGB shows drive, intake, and launcher. RGB2 is red while adjusting in defense,
+ * orange while holding, a slow rainbow while being pushed, and green when the
+ * launcher encoder is holding shoot speed. Gamepad 2 both triggers plus dpad
+ * right toggles a rainbow on both lights. The pollen webcam is optional.
  */
 @TeleOp(name = "BiobuzzTeleop", group = "TeamCode")
 public class BiobuzzTeleop extends LinearOpMode {
@@ -68,6 +69,7 @@ public class BiobuzzTeleop extends LinearOpMode {
     private PollenCamera pollenCamera;
 
     private static final double JOYSTICK_DEADZONE = 0.05;
+    private static final double TRIGGER_PRESSED = 0.5;
     private static final double AIM_TURN_POWER = 0.08;
     private static final double DEFENSE_TRANSLATION_SCALE = 0.4;
     private static final double DEFENSE_TURN_SCALE = 0.35;
@@ -215,7 +217,9 @@ public class BiobuzzTeleop extends LinearOpMode {
             }
         }
 
-        if (gamepad2.dpad_right && !prevDpadRight) {
+        boolean triggersHeld = gamepad2.left_trigger >= TRIGGER_PRESSED
+                && gamepad2.right_trigger >= TRIGGER_PRESSED;
+        if (triggersHeld && gamepad2.dpad_right && !prevDpadRight) {
             partyMode = !partyMode;
         }
         prevDpadRight = gamepad2.dpad_right;
@@ -437,6 +441,8 @@ public class BiobuzzTeleop extends LinearOpMode {
                 Math.abs(intakePower) > MOVE_COMMAND,
                 ticksPerSec >= LAUNCHER_MOVE_TICKS_PER_SEC,
                 defenseMode,
+                holdingPosition,
+                fighting,
                 launcherAtShootSpeed(ticksPerSec),
                 partyMode);
     }
@@ -560,11 +566,12 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addLine("GP2 right stick: launcher");
         telemetry.addLine("GP2 dpad up: gate forward");
         telemetry.addLine("GP2 dpad down: gate back");
-        telemetry.addLine("GP2 dpad right: toggle rainbow lights");
+        telemetry.addLine("GP2 both triggers + dpad right: toggle rainbow lights");
         telemetry.addLine("GP2 left bumper: hold to retract javelin");
         telemetry.addLine("GP2 right bumper: hold to deploy javelin");
         telemetry.addLine("RGB: yellow drive, green intake, purple launcher");
-        telemetry.addLine("RGB2: red defense, green when launcher encoder holds shoot speed");
+        telemetry.addLine("RGB2 defense: red adjusting, orange hold, rainbow fight");
+        telemetry.addLine("RGB2 green when launcher encoder holds shoot speed");
         telemetry.update();
     }
 }
