@@ -3,154 +3,179 @@ package org.firstinspires.ftc.teamcode;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
 
+import java.util.Random;
+
 /**
- * goBILDA RGB Indicator Light (3118-0808-0002) on a servo port.
- * Configure it as a Servo named "RGB". The hub's normal 500-2500 us range
- * maps positions below 0.30 to off, 0.30-0.70 through red to magenta, and
- * above 0.70 to white. These positions stay inside the solid colors.
+ * Two goBILDA RGB Indicator Lights (3118-0808-0002).
+ * Configure them as Servos named "RGB" and "RGB2".
+ * The hub's normal 500-2500 us range maps positions below 0.30 to off,
+ * 0.30-0.70 through red to magenta, and above 0.70 to white.
  *
- * One color at a time, highest match first:
- * fight rainbow, nectar, defense hold, then pollen counts when the camera
- * has a reading. Purple and orange do not need the camera. With no reading
- * the ball colors stay off. A low battery blinks red only when that would
- * otherwise be off or empty.
+ * RGB shows what is moving, launcher first, then intake, then drive.
+ * RGB2 is red in defense mode, otherwise green once the launcher is at shoot speed.
+ * Rainbow mode picks a new color for each light on its own.
  */
 public final class RgbIndicator {
     public static final String DEVICE_NAME = "RGB";
+    public static final String DEVICE_NAME_2 = "RGB2";
 
     static final double OFF = 0.0;
     static final double RED = 0.33;
-    static final double ORANGE = 0.39;
     static final double YELLOW = 0.45;
     static final double GREEN = 0.50;
     static final double PURPLE = 0.66;
-    static final double RAINBOW_START = 0.32;
-    static final double RAINBOW_END = 0.69;
+    static final double COLOR_MIN = 0.32;
+    static final double COLOR_MAX = 0.69;
 
-    private static final long BLINK_HALF_PERIOD_MS = 400;
-    private static final long RAINBOW_PERIOD_MS = 80;
+    private static final long PARTY_STEP_MS = 180;
+    private static final double PARTY_SEPARATION = 0.06;
 
-    private final Servo light;
-    private String label = "off";
+    private final Servo rgb;
+    private final Servo rgb2;
+    private final Random random = new Random();
+    private double partyRgb = YELLOW;
+    private double partyRgb2 = PURPLE;
+    private long nextPartyMs;
+    private String rgbLabel = "off";
+    private String rgb2Label = "off";
 
-    private RgbIndicator(Servo light) {
-        this.light = light;
-        if (light != null) {
-            light.setPosition(OFF);
-        }
+    private RgbIndicator(Servo rgb, Servo rgb2) {
+        this.rgb = rgb;
+        this.rgb2 = rgb2;
+        set(rgb, OFF);
+        set(rgb2, OFF);
     }
 
     public static RgbIndicator attach(HardwareMap hardwareMap) {
-        try {
-            return new RgbIndicator(hardwareMap.get(Servo.class, DEVICE_NAME));
-        } catch (RuntimeException exception) {
-            return new RgbIndicator(null);
+        return new RgbIndicator(find(hardwareMap, DEVICE_NAME), find(hardwareMap, DEVICE_NAME_2));
+    }
+
+    public int lightCount() {
+        int count = 0;
+        if (rgb != null) {
+            count++;
         }
+        if (rgb2 != null) {
+            count++;
+        }
+        return count;
     }
 
     public void update(
-            boolean fighting,
-            boolean nectarMode,
-            boolean defenseHolding,
-            boolean lowBattery,
-            boolean ballReading,
-            int frontCount,
-            int storageCount) {
-        if (light == null) {
-            label = "not configured";
+            boolean robotMoving,
+            boolean intakeMoving,
+            boolean launcherMoving,
+            boolean defenseMode,
+            boolean launcherAtSpeed,
+            boolean party) {
+        if (party) {
+            rollPartyColors();
+            rgbLabel = "rainbow";
+            rgb2Label = "rainbow";
+            set(rgb, partyRgb);
+            set(rgb2, partyRgb2);
             return;
         }
 
-        Choice choice = choose(
-                fighting,
-                nectarMode,
-                defenseHolding,
-                lowBattery,
-                ballReading,
-                frontCount,
-                storageCount);
-        label = choice.label;
-        if (choice.rainbow) {
-            light.setPosition(rainbowPosition());
-            return;
-        }
-        boolean lit = !choice.blink || blinkLit();
-        light.setPosition(lit ? choice.position : OFF);
+        double rgbPosition = rgbPosition(launcherMoving, intakeMoving, robotMoving);
+        double rgb2Position = rgb2Position(defenseMode, launcherAtSpeed);
+        rgbLabel = rgbLabel(launcherMoving, intakeMoving, robotMoving);
+        rgb2Label = rgb2Label(defenseMode, launcherAtSpeed);
+        set(rgb, rgbPosition);
+        set(rgb2, rgb2Position);
     }
 
     public void off() {
-        label = light == null ? "not configured" : "off";
+        rgbLabel = rgb == null ? "not configured" : "off";
+        rgb2Label = rgb2 == null ? "not configured" : "off";
+        set(rgb, OFF);
+        set(rgb2, OFF);
+    }
+
+    public String rgbLabel() {
+        return rgbLabel;
+    }
+
+    public String rgb2Label() {
+        return rgb2Label;
+    }
+
+    static double rgbPosition(boolean launcherMoving, boolean intakeMoving, boolean robotMoving) {
+        if (launcherMoving) {
+            return PURPLE;
+        }
+        if (intakeMoving) {
+            return GREEN;
+        }
+        if (robotMoving) {
+            return YELLOW;
+        }
+        return OFF;
+    }
+
+    static double rgb2Position(boolean defenseMode, boolean launcherAtSpeed) {
+        if (defenseMode) {
+            return RED;
+        }
+        if (launcherAtSpeed) {
+            return GREEN;
+        }
+        return OFF;
+    }
+
+    private static String rgbLabel(boolean launcherMoving, boolean intakeMoving, boolean robotMoving) {
+        if (launcherMoving) {
+            return "purple launcher";
+        }
+        if (intakeMoving) {
+            return "green intake";
+        }
+        if (robotMoving) {
+            return "yellow drive";
+        }
+        return "off";
+    }
+
+    private static String rgb2Label(boolean defenseMode, boolean launcherAtSpeed) {
+        if (defenseMode) {
+            return "red defense";
+        }
+        if (launcherAtSpeed) {
+            return "green ready";
+        }
+        return "off";
+    }
+
+    private void rollPartyColors() {
+        long now = System.currentTimeMillis();
+        if (now < nextPartyMs) {
+            return;
+        }
+        nextPartyMs = now + PARTY_STEP_MS;
+        partyRgb = randomColor();
+        partyRgb2 = randomColor();
+        int guard = 0;
+        while (Math.abs(partyRgb - partyRgb2) < PARTY_SEPARATION && guard < 8) {
+            partyRgb2 = randomColor();
+            guard++;
+        }
+    }
+
+    private double randomColor() {
+        return COLOR_MIN + random.nextDouble() * (COLOR_MAX - COLOR_MIN);
+    }
+
+    private static Servo find(HardwareMap hardwareMap, String name) {
+        try {
+            return hardwareMap.get(Servo.class, name);
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
+    private static void set(Servo light, double position) {
         if (light != null) {
-            light.setPosition(OFF);
-        }
-    }
-
-    public String label() {
-        return label;
-    }
-
-    static Choice choose(
-            boolean fighting,
-            boolean nectarMode,
-            boolean defenseHolding,
-            boolean lowBattery,
-            boolean ballReading,
-            int frontCount,
-            int storageCount) {
-        if (fighting) {
-            return new Choice(RAINBOW_START, false, true, "fighting");
-        }
-        if (nectarMode) {
-            if (defenseHolding) {
-                return new Choice(PURPLE, true, "nectar, defense hold");
-            }
-            return new Choice(PURPLE, false, "nectar");
-        }
-        if (defenseHolding) {
-            return new Choice(ORANGE, true, "defense hold");
-        }
-        if (ballReading && frontCount > 0) {
-            return new Choice(GREEN, false, "front loaded");
-        }
-        if (ballReading && storageCount > 0) {
-            return new Choice(YELLOW, false, "storage only");
-        }
-        if (ballReading && lowBattery) {
-            return new Choice(RED, true, "empty, low battery");
-        }
-        if (ballReading) {
-            return new Choice(RED, false, "empty");
-        }
-        if (lowBattery) {
-            return new Choice(RED, true, "low battery");
-        }
-        return new Choice(OFF, false, "off");
-    }
-
-    private static boolean blinkLit() {
-        return (System.currentTimeMillis() / BLINK_HALF_PERIOD_MS) % 2 == 0;
-    }
-
-    private static double rainbowPosition() {
-        double phase = (System.currentTimeMillis() % RAINBOW_PERIOD_MS) / (double) RAINBOW_PERIOD_MS;
-        return RAINBOW_START + phase * (RAINBOW_END - RAINBOW_START);
-    }
-
-    static final class Choice {
-        final double position;
-        final boolean blink;
-        final boolean rainbow;
-        final String label;
-
-        Choice(double position, boolean blink, String label) {
-            this(position, blink, false, label);
-        }
-
-        Choice(double position, boolean blink, boolean rainbow, String label) {
-            this.position = position;
-            this.blink = blink;
-            this.rainbow = rainbow;
-            this.label = label;
+            light.setPosition(position);
         }
     }
 }

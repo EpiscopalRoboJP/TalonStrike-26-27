@@ -15,7 +15,6 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
-import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
@@ -38,23 +37,19 @@ import static com.acmerobotics.roadrunner.Actions.now;
 public class BiobuzzAuto extends LinearOpMode {
     private DcMotor laucher;
     private CRServo intake;
-    private Servo ramp;
     private CRServo javelin;
     private MecanumDrive drive;
 
     private String stage = "init";
     private final ElapsedTime autoTimer = new ElapsedTime();
 
-    private static final double RAMP_RANGE_DEGREES = 300.0;
-    private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
-    private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
     // Full deploy stroke from BiobuzzTeleop. Longer than this stalls the servo at the stop.
     private static final double JAVELIN_RUN_SECONDS = 13.0;
     private static final double JAVELIN_POWER = 1.0;
 
     private static final double INTAKE_FEED_POWER = -1.0;
 
-    // Pollen flywheel curve from BiobuzzTeleop. The preload is pollen, so nectar power is never used.
+    // Pollen flywheel curve from BiobuzzTeleop.
     private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
     private static final double FLYWHEEL_VOLTAGE_MID = 12.6;
     private static final double FLYWHEEL_VOLTAGE_LOW = 12.3;
@@ -101,7 +96,6 @@ public class BiobuzzAuto extends LinearOpMode {
         intake = hardwareMap.get(CRServo.class, "Intake");
         intake.setDirection(DcMotorSimple.Direction.REVERSE);
         laucher = hardwareMap.get(DcMotor.class, "Laucher");
-        ramp = hardwareMap.get(Servo.class, "Ramp");
         javelin = hardwareMap.get(CRServo.class, "Javelin");
         drive = new MecanumDrive(hardwareMap, AutoProfile.START);
 
@@ -109,7 +103,6 @@ public class BiobuzzAuto extends LinearOpMode {
         laucher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         laucher.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
-        ramp.setPosition(RAMP_DOWN_POSITION);
         stopActuators();
     }
 
@@ -169,7 +162,6 @@ public class BiobuzzAuto extends LinearOpMode {
                 laucher.setPower(pollenPower());
                 if (autoTimer.seconds() >= SHOOT_CUTOFF_SECONDS) {
                     intake.setPower(0);
-                    ramp.setPosition(RAMP_DOWN_POSITION);
                     return false;
                 }
                 if (startedAt < 0) {
@@ -178,19 +170,13 @@ public class BiobuzzAuto extends LinearOpMode {
                 double elapsed = now() - startedAt;
                 if (elapsed >= totalSeconds) {
                     intake.setPower(0);
-                    ramp.setPosition(RAMP_DOWN_POSITION);
                     return false;
                 }
 
-                boolean rampUp = false;
                 boolean intakeOn = false;
                 double cursor = AutoProfile.SPINUP_SECONDS;
                 for (int shot = 0; shot < AutoProfile.SHOT_COUNT; shot++) {
-                    double feedEnd = cursor + AutoProfile.FEED_PULSE_SECONDS;
-                    if (elapsed >= cursor && elapsed < feedEnd) {
-                        rampUp = true;
-                    }
-                    cursor = feedEnd;
+                    cursor += AutoProfile.FEED_PULSE_SECONDS;
                     if (shot < AutoProfile.SHOT_COUNT - 1) {
                         double intakeEnd = cursor + AutoProfile.INTAKE_INDEX_SECONDS;
                         if (elapsed >= cursor && elapsed < intakeEnd) {
@@ -199,7 +185,6 @@ public class BiobuzzAuto extends LinearOpMode {
                         cursor = intakeEnd + AutoProfile.BETWEEN_SHOTS_SECONDS;
                     }
                 }
-                ramp.setPosition(rampUp ? RAMP_UP_POSITION : RAMP_DOWN_POSITION);
                 intake.setPower(intakeOn ? INTAKE_FEED_POWER : 0.0);
                 updateTelemetry();
                 return true;

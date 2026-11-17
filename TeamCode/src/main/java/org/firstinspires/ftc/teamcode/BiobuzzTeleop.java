@@ -8,8 +8,8 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
-import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 import org.firstinspires.ftc.teamcode.vision.PollenCamera;
@@ -19,7 +19,9 @@ import org.firstinspires.ftc.teamcode.vision.PollenVisionResult;
  * Teleop for GoBilda mecanum drive with a continuous-rotation intake.
  * Gamepad 1 X toggles shooting defense: slower drive, finer aim, and an
  * odometry hold that drives back to the last commanded pose when the sticks are released.
- * The top RGB indicator is a Servo named "RGB". The pollen webcam is optional.
+ * RGB shows drive, intake, and launcher. RGB2 shows defense, or green when the
+ * launcher encoder is holding shoot speed. Gamepad 2 dpad right toggles a rainbow
+ * on both lights. The pollen webcam is optional.
  */
 @TeleOp(name = "BiobuzzTeleop", group = "TeamCode")
 public class BiobuzzTeleop extends LinearOpMode {
@@ -28,8 +30,7 @@ public class BiobuzzTeleop extends LinearOpMode {
     private DcMotor backLeftMotor;
     private DcMotor backRightMotor;
     private CRServo intake;
-    private DcMotor laucher;
-    private Servo ramp;
+    private DcMotorEx laucher;
     private CRServo gate;
     private CRServo javelin;
 
@@ -58,11 +59,11 @@ public class BiobuzzTeleop extends LinearOpMode {
     private double holdErrorY;
     private double holdErrorHeading;
 
-    private boolean rampPosition;
-    private boolean rampLatchedUp;
-    private boolean prevBButton;
-    private boolean prevDpadLeft;
-    private boolean nectarMode;
+    private boolean prevDpadRight;
+    private boolean partyMode;
+    private double launcherTicksPerSec;
+    private double launcherPeakTicksPerSec;
+    private long launcherPeakMs;
     private RgbIndicator indicator;
     private PollenCamera pollenCamera;
 
@@ -88,12 +89,14 @@ public class BiobuzzTeleop extends LinearOpMode {
     private static final double HOLD_FIGHT_KD_SCALE = 4.0;
     private static final double HOLD_FIGHT_MAX_POWER = 1.0;
     private static final double HOLD_FIGHT_MIN_POWER = 0.28;
-    private static final double RAMP_RANGE_DEGREES = 300.0;
-    private static final double RAMP_UP_POSITION = 180.0 / RAMP_RANGE_DEGREES;
-    private static final double RAMP_DOWN_POSITION = 90.0 / RAMP_RANGE_DEGREES;
     private static final double JAVELIN_POWER = 1.0;
     private static final double GATE_POWER = 0.5;
-    private static final double NECTAR_MAX_POWER = 1.0;
+    private static final double MOVE_COMMAND = 0.02;
+    private static final double LAUNCHER_READY_FRACTION = 0.97;
+    private static final double LAUNCHER_MOVE_TICKS_PER_SEC = 40.0;
+    private static final double LAUNCHER_MIN_TICKS_PER_SEC = 100.0;
+    private static final double LAUNCHER_SPEED_HOLD = 0.92;
+    private static final long LAUNCHER_SETTLE_MS = 150;
     private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
     private static final double FLYWHEEL_VOLTAGE_MID = 12.6;
     private static final double FLYWHEEL_VOLTAGE_LOW = 12.3;
@@ -141,8 +144,7 @@ public class BiobuzzTeleop extends LinearOpMode {
         backRightMotor = hardwareMap.get(DcMotor.class, "BR");
         intake = hardwareMap.get(CRServo.class, "Intake");
         intake.setDirection(DcMotorSimple.Direction.REVERSE);
-        laucher = hardwareMap.get(DcMotor.class, "Laucher");
-        ramp = hardwareMap.get(Servo.class, "Ramp");
+        laucher = hardwareMap.get(DcMotorEx.class, "Laucher");
         gate = hardwareMap.get(CRServo.class, "Gate");
         javelin = hardwareMap.get(CRServo.class, "Javelin");
 
@@ -163,9 +165,9 @@ public class BiobuzzTeleop extends LinearOpMode {
 
         laucher.setDirection(DcMotor.Direction.FORWARD);
         laucher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        // Power stays open-loop. The encoder is read for speed only.
         laucher.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
-        ramp.setPosition(RAMP_DOWN_POSITION);
         gate.setPower(0);
         stopActuators();
 
@@ -213,22 +215,14 @@ public class BiobuzzTeleop extends LinearOpMode {
             }
         }
 
-        if (gamepad2.dpad_left && !prevDpadLeft) {
-            nectarMode = !nectarMode;
+        if (gamepad2.dpad_right && !prevDpadRight) {
+            partyMode = !partyMode;
         }
-        prevDpadLeft = gamepad2.dpad_left;
+        prevDpadRight = gamepad2.dpad_right;
 
-        double launcherCap = nectarMode ? NECTAR_MAX_POWER : flywheelPowerForVoltage(readBatteryVoltage());
+        double launcherCap = flywheelPowerForVoltage(readBatteryVoltage());
         laucherPower = launcherCap * joystickExponentialCurve(deadzone(gamepad2.right_stick_y));
         intakePower = joystickExponentialCurve(deadzone(gamepad2.left_stick_y));
-
-        if (gamepad2.b && !prevBButton) {
-            rampLatchedUp = !rampLatchedUp;
-        }
-        prevBButton = gamepad2.b;
-
-        boolean rampHeldUp = gamepad2.a && intakePower == 0.0;
-        rampPosition = rampHeldUp || rampLatchedUp;
 
         boolean gateForward = gamepad2.dpad_up;
         boolean gateBack = gamepad2.dpad_down;
@@ -429,28 +423,53 @@ public class BiobuzzTeleop extends LinearOpMode {
     }
 
     private void updateServoPositions() {
-        ramp.setPosition(rampPosition ? RAMP_UP_POSITION : RAMP_DOWN_POSITION);
         gate.setPower(gatePower);
         javelin.setPower(javelinPower);
     }
 
     private void updateIndicator() {
-        boolean ballReading = pollenCamera != null && pollenCamera.hasReading();
-        int frontCount = 0;
-        int storageCount = 0;
-        if (ballReading) {
-            PollenVisionResult result = pollenCamera.result();
-            frontCount = result.frontCount;
-            storageCount = result.storageCount;
-        }
+        boolean robotMoving = Math.abs(drive) > MOVE_COMMAND
+                || Math.abs(strafe) > MOVE_COMMAND
+                || Math.abs(turn) > MOVE_COMMAND;
+        double ticksPerSec = readLauncherTicksPerSec();
         indicator.update(
-                fighting,
-                nectarMode,
-                holdingPosition,
-                batteryVoltage <= FLYWHEEL_VOLTAGE_LOW,
-                ballReading,
-                frontCount,
-                storageCount);
+                robotMoving,
+                Math.abs(intakePower) > MOVE_COMMAND,
+                ticksPerSec >= LAUNCHER_MOVE_TICKS_PER_SEC,
+                defenseMode,
+                launcherAtShootSpeed(ticksPerSec),
+                partyMode);
+    }
+
+    private double readLauncherTicksPerSec() {
+        if (laucher == null) {
+            launcherTicksPerSec = 0.0;
+            return 0.0;
+        }
+        launcherTicksPerSec = Math.abs(laucher.getVelocity());
+        return launcherTicksPerSec;
+    }
+
+    /**
+     * Full stick asks for the shot. Green once the encoder stops climbing and
+     * holds that speed, which is the wheel at the speed this power produces.
+     */
+    private boolean launcherAtShootSpeed(double ticksPerSec) {
+        double cap = flywheelPowerForVoltage(batteryVoltage);
+        boolean atCap = cap > 0.0 && Math.abs(laucherPower) >= cap * LAUNCHER_READY_FRACTION;
+        if (!atCap) {
+            launcherPeakTicksPerSec = 0.0;
+            launcherPeakMs = 0L;
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (ticksPerSec > launcherPeakTicksPerSec * 1.02) {
+            launcherPeakTicksPerSec = ticksPerSec;
+            launcherPeakMs = now;
+        }
+        return launcherPeakTicksPerSec >= LAUNCHER_MIN_TICKS_PER_SEC
+                && ticksPerSec >= launcherPeakTicksPerSec * LAUNCHER_SPEED_HOLD
+                && now - launcherPeakMs >= LAUNCHER_SETTLE_MS;
     }
 
     private void stopActuators() {
@@ -503,9 +522,10 @@ public class BiobuzzTeleop extends LinearOpMode {
                     holdErrorX, holdErrorY, Math.toDegrees(holdErrorHeading));
         }
         telemetry.addData("Intake", "%.2f", intakePower);
-        telemetry.addData("Launch mode", nectarMode ? "nectar" : "pollen");
         telemetry.addData("Battery", "%.2f V", batteryVoltage);
-        telemetry.addData("Light", indicator.label());
+        telemetry.addData("RGB", "%s", indicator.rgbLabel());
+        telemetry.addData("RGB2", "%s", indicator.rgb2Label());
+        telemetry.addData("Lights", indicator.lightCount());
         if (pollenCamera == null) {
             telemetry.addData("Balls", "camera not configured");
         } else if (!pollenCamera.hasReading()) {
@@ -514,8 +534,7 @@ public class BiobuzzTeleop extends LinearOpMode {
             PollenVisionResult balls = pollenCamera.result();
             telemetry.addData("Balls", "front %d  storage %d", balls.frontCount, balls.storageCount);
         }
-        telemetry.addData("Laucher", "%.2f", laucherPower);
-        telemetry.addData("Ramp", rampPosition ? "up 180 deg" : "down 90 deg");
+        telemetry.addData("Laucher", "%.2f power  %.0f ticks/s", laucherPower, launcherTicksPerSec);
         if (gatePower > 0.0) {
             telemetry.addData("Gate", "forward %.2f", GATE_POWER);
         } else if (gatePower < 0.0) {
@@ -541,13 +560,11 @@ public class BiobuzzTeleop extends LinearOpMode {
         telemetry.addLine("GP2 right stick: launcher");
         telemetry.addLine("GP2 dpad up: gate forward");
         telemetry.addLine("GP2 dpad down: gate back");
-        telemetry.addLine("GP2 dpad left: pollen / nectar");
-        telemetry.addLine("GP2 A: hold ramp up while intake is stopped");
-        telemetry.addLine("GP2 B: toggle ramp up or down");
+        telemetry.addLine("GP2 dpad right: toggle rainbow lights");
         telemetry.addLine("GP2 left bumper: hold to retract javelin");
         telemetry.addLine("GP2 right bumper: hold to deploy javelin");
-        telemetry.addLine("Light: purple nectar, orange blink defense hold, rainbow while pushed");
-        telemetry.addLine("Light balls: green front, yellow storage, red empty");
+        telemetry.addLine("RGB: yellow drive, green intake, purple launcher");
+        telemetry.addLine("RGB2: red defense, green when launcher encoder holds shoot speed");
         telemetry.update();
     }
 }

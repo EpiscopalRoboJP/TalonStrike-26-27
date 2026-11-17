@@ -4,27 +4,17 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 /**
- * Tune ramp positions, javelin run time, and launcher speed.
+ * Tune javelin run time and launcher speed.
  * Hold gamepad 2 dpad up to run the gate forward and down to run it back.
- * Ramp degrees assume a 300 degree servo range.
  */
 @TeleOp(name = "Servo Test", group = "TeamCode")
 public class ServoTest extends LinearOpMode {
-    private Servo ramp;
     private CRServo gate;
     private CRServo javelin;
     private DcMotor laucher;
-
-    private double rampPosition = 90.0 / RAMP_RANGE_DEGREES;
-    private double rampStep = 0.01;
-    private double rampDownPosition = 90.0 / RAMP_RANGE_DEGREES;
-    private double rampUpPosition = 180.0 / RAMP_RANGE_DEGREES;
-    private boolean rampDownSaved = true;
-    private boolean rampUpSaved = true;
 
     private double gatePower;
     private double gateSpeed = 0.5;
@@ -36,12 +26,6 @@ public class ServoTest extends LinearOpMode {
     private boolean javelinRunning;
     private boolean javelinReplaying;
 
-    private boolean prevDpadUp;
-    private boolean prevDpadDown;
-    private boolean prevDpadLeft;
-    private boolean prevDpadRight;
-    private boolean prevSaveDown;
-    private boolean prevSaveUp;
     private boolean prevReplay;
     private boolean prevReset;
 
@@ -53,12 +37,9 @@ public class ServoTest extends LinearOpMode {
     private boolean prevLauncherDpadRight;
 
     private ElapsedTime javelinTimer = new ElapsedTime();
-    private ElapsedTime rampStepTimer = new ElapsedTime();
     private ElapsedTime laucherStepTimer = new ElapsedTime();
     private ElapsedTime gateSpeedTimer = new ElapsedTime();
 
-    private static final double RAMP_RANGE_DEGREES = 300.0;
-    private static final double RAMP_STEP_SECONDS = 0.2;
     private static final double STICK_STEP_THRESHOLD = 0.5;
     private static final double JAVELIN_POWER = 1.0;
     private static final double GATE_SPEED_STEP = 0.05;
@@ -75,7 +56,6 @@ public class ServoTest extends LinearOpMode {
         waitForStart();
 
         while (opModeIsActive()) {
-            updateRamp();
             updateGate();
             updateJavelin();
             updateLauncher();
@@ -86,7 +66,6 @@ public class ServoTest extends LinearOpMode {
     }
 
     private void initHardware() {
-        ramp = hardwareMap.get(Servo.class, "Ramp");
         gate = hardwareMap.get(CRServo.class, "Gate");
         javelin = hardwareMap.get(CRServo.class, "Javelin");
         laucher = hardwareMap.get(DcMotor.class, "Laucher");
@@ -95,59 +74,9 @@ public class ServoTest extends LinearOpMode {
         laucher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         laucher.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
-        ramp.setPosition(rampPosition);
         gate.setPower(0);
         javelin.setPower(0);
         laucher.setPower(0);
-    }
-
-    private void updateRamp() {
-        boolean stepUp = gamepad1.dpad_up;
-        boolean stepDown = gamepad1.dpad_down;
-        if (stepUp && stepDown) {
-            stepUp = false;
-            stepDown = false;
-        }
-
-        boolean stepPressed = (stepUp && !prevDpadUp) || (stepDown && !prevDpadDown);
-        boolean stepHeld = (stepUp && prevDpadUp) || (stepDown && prevDpadDown);
-        if (stepPressed || (stepHeld && rampStepTimer.seconds() >= RAMP_STEP_SECONDS)) {
-            rampPosition += stepUp ? rampStep : -rampStep;
-            rampPosition = Math.max(0.0, Math.min(1.0, rampPosition));
-            rampPosition = Math.round(rampPosition * 100.0) / 100.0;
-            rampStepTimer.reset();
-        }
-        prevDpadUp = gamepad1.dpad_up;
-        prevDpadDown = gamepad1.dpad_down;
-
-        if (gamepad1.dpad_right && !prevDpadRight) {
-            rampStep = Math.min(0.10, Math.round((rampStep + 0.01) * 100.0) / 100.0);
-        }
-        if (gamepad1.dpad_left && !prevDpadLeft) {
-            rampStep = Math.max(0.01, Math.round((rampStep - 0.01) * 100.0) / 100.0);
-        }
-        prevDpadLeft = gamepad1.dpad_left;
-        prevDpadRight = gamepad1.dpad_right;
-
-        if (gamepad1.a && !prevSaveDown) {
-            rampDownPosition = rampPosition;
-            rampDownSaved = true;
-        }
-        if (gamepad1.y && !prevSaveUp) {
-            rampUpPosition = rampPosition;
-            rampUpSaved = true;
-        }
-        prevSaveDown = gamepad1.a;
-        prevSaveUp = gamepad1.y;
-
-        if (gamepad1.left_stick_button && rampDownSaved) {
-            rampPosition = rampDownPosition;
-        }
-        if (gamepad1.right_stick_button && rampUpSaved) {
-            rampPosition = rampUpPosition;
-        }
-
-        ramp.setPosition(rampPosition);
     }
 
     private void updateGate() {
@@ -261,11 +190,6 @@ public class ServoTest extends LinearOpMode {
     }
 
     private void updateTelemetry() {
-        telemetry.addData("Ramp position", "%.2f", rampPosition);
-        telemetry.addData("Ramp degrees", "%.0f", rampPosition * RAMP_RANGE_DEGREES);
-        telemetry.addData("Ramp step", "%.2f", rampStep);
-        addSavedPosition("Ramp down", rampDownSaved, rampDownPosition);
-        addSavedPosition("Ramp up", rampUpSaved, rampUpPosition);
         telemetry.addData("Gate speed", "%.2f", gateSpeed);
         if (gatePower > 0.0) {
             telemetry.addData("Gate", "forward");
@@ -286,12 +210,6 @@ public class ServoTest extends LinearOpMode {
         telemetry.addData("Launcher power", "%.2f", laucherPower);
         telemetry.addData("Launcher step", "%.2f", laucherStep);
         telemetry.addLine("Controls (gamepad 1)");
-        telemetry.addLine("Dpad up/down: move ramp");
-        telemetry.addLine("Dpad left/right: smaller/bigger step");
-        telemetry.addLine("A: save ramp down");
-        telemetry.addLine("Y: save ramp up");
-        telemetry.addLine("Left stick click: go to saved down");
-        telemetry.addLine("Right stick click: go to saved up");
         telemetry.addLine("Right bumper: javelin forward, release to stop");
         telemetry.addLine("Left bumper: javelin reverse, release to stop");
         telemetry.addLine("B: replay that javelin time");
@@ -303,13 +221,5 @@ public class ServoTest extends LinearOpMode {
         telemetry.addLine("Right stick up/down: launcher speed");
         telemetry.addLine("Dpad left/right: smaller/bigger launcher step");
         telemetry.update();
-    }
-
-    private void addSavedPosition(String label, boolean saved, double position) {
-        if (saved) {
-            telemetry.addData(label, "%.2f  %.0f deg", position, position * RAMP_RANGE_DEGREES);
-        } else {
-            telemetry.addData(label, "not saved");
-        }
     }
 }
