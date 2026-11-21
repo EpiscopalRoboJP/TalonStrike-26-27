@@ -13,9 +13,9 @@ import com.acmerobotics.roadrunner.Vector2d;
  * heading 0 faces +X and positive heading is counter-clockwise. On the robot,
  * forward is along the heading and left is 90 degrees counter-clockwise.
  *
- * Red starts against the audience wall, facing away from it. The route is
- * 0.5 tile forward, shoot, 1.25 tiles left, 3 tiles forward, then 0.5 tile
- * left into the red loading zone.
+ * Red starts against the audience wall, facing it. The route backs up
+ * 0.5 tile, shoots toward the audience, strafes 1.25 tiles toward the red
+ * wall, backs up 3 tiles, then strafes 0.1 tile into the red loading zone.
  */
 public final class AutoProfile {
     private AutoProfile() {
@@ -32,17 +32,17 @@ public final class AutoProfile {
     public static final double ROBOT_IN = 18.0;
     public static final double HALF_FIELD_IN = 72.0;
 
-    // 1.5 tiles left of this point puts an 18 in robot against the red wall.
+    // 1.5 tiles toward the red wall from here puts an 18 in robot against that wall.
     public static final Pose2d START = new Pose2d(
             -HALF_FIELD_IN + ROBOT_IN / 2.0 + 1.5 * TILE_IN,
             -HALF_FIELD_IN + ROBOT_IN / 2.0,
-            Math.PI / 2.0);
+            -Math.PI / 2.0);
 
     public static final double SPINUP_SECONDS = 1.5;
     public static final double FEED_PULSE_SECONDS = 0.4;
     public static final double INTAKE_INDEX_SECONDS = 0.6;
     public static final double BETWEEN_SHOTS_SECONDS = 0.2;
-    public static final int SHOT_COUNT = 10;
+    public static final int SHOT_COUNT = 4;
 
     // Road Runner refuses a profile whose length is 0.
     public static final double MIN_TURN_RAD = Math.toRadians(0.5);
@@ -71,24 +71,24 @@ public final class AutoProfile {
     }
 
     public static Pose2d shootPose(Pose2d start) {
-        return offset(start, 0.5 * TILE_IN, 0.0);
+        return offset(start, -0.5 * TILE_IN, 0.0);
     }
 
     public static Pose2d afterLeftPose(Pose2d start) {
-        return offset(shootPose(start), 0.4, 1.25 * TILE_IN);
+        return offset(shootPose(start), -0.4, -1.25 * TILE_IN);
     }
 
     public static Pose2d parkPose(Pose2d start) {
-        return offset(afterLeftPose(start), 3.0 * TILE_IN, 0.0);
+        return offset(afterLeftPose(start), -3.0 * TILE_IN, 0.0);
     }
 
     public static Pose2d fullParkPose(Pose2d start) {
-        return offset(parkPose(start), 0.0, 0.1 * TILE_IN);
+        return offset(parkPose(start), 0.0, -0.1 * TILE_IN);
     }
 
     /**
-     * Drive forward half a tile, wait out the four pollen shots, strafe left,
-     * drive forward, then strafe left half a tile to finish in the loading zone.
+     * Back up half a tile, wait out the pollen shots while facing the audience,
+     * strafe toward the red wall, back up, then strafe into the loading zone.
      * The builder must already be started at {@code start}.
      */
     public static Action buildAuto(TrajectoryActionBuilder builder, Pose2d start) {

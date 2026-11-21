@@ -25,10 +25,10 @@ import static com.acmerobotics.roadrunner.Actions.now;
  * Autonomous: shoot the 4 preloaded Pollen from the start spot, then park in the Loading Zone.
  * Driving uses Road Runner. Position comes from the three dead-wheel pods on FL, BR, and BL.
  *
- * No driver input after the opmode is selected. Heading stays pointed away from the audience.
+ * No driver input after the opmode is selected. Heading stays pointed at the audience.
  *
- * Place the robot on the red side, touching the audience wall, facing away from
- * the audience. The route and drive limits live in AutoProfile, which MeepMeep reads too.
+ * Place the robot on the red side, touching the audience wall, facing the
+ * audience. The route and drive limits live in AutoProfile, which MeepMeep reads too.
  * The preload is 4 pollen, so the launcher stays on BiobuzzTeleop's pollen curve
  * for the whole auto and stops only when the routine ends. RGB and RGB2 follow
  * teleop: purple while the launcher spins, green while the intake runs, yellow
