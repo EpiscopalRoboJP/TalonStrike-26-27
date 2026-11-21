@@ -10,7 +10,6 @@ import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
-import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 import org.firstinspires.ftc.teamcode.vision.PollenCamera;
 import org.firstinspires.ftc.teamcode.vision.PollenVisionResult;
@@ -63,8 +62,8 @@ public class BiobuzzTeleop extends LinearOpMode {
     private boolean prevDpadRight;
     private boolean partyMode;
     private double launcherTicksPerSec;
-    private double launcherPeakTicksPerSec;
-    private long launcherPeakMs;
+    private final BiobuzzMechanisms.LauncherSpeedTracker launcherSpeed =
+            new BiobuzzMechanisms.LauncherSpeedTracker();
     private RgbIndicator indicator;
     private PollenCamera pollenCamera;
 
@@ -91,20 +90,6 @@ public class BiobuzzTeleop extends LinearOpMode {
     private static final double HOLD_FIGHT_KD_SCALE = 4.0;
     private static final double HOLD_FIGHT_MAX_POWER = 1.0;
     private static final double HOLD_FIGHT_MIN_POWER = 0.28;
-    private static final double JAVELIN_POWER = 1.0;
-    private static final double GATE_POWER = 0.5;
-    private static final double MOVE_COMMAND = 0.02;
-    private static final double LAUNCHER_READY_FRACTION = 0.97;
-    private static final double LAUNCHER_MOVE_TICKS_PER_SEC = 40.0;
-    private static final double LAUNCHER_MIN_TICKS_PER_SEC = 100.0;
-    private static final double LAUNCHER_SPEED_HOLD = 0.92;
-    private static final long LAUNCHER_SETTLE_MS = 150;
-    private static final double FLYWHEEL_VOLTAGE_HIGH = 13.0;
-    private static final double FLYWHEEL_VOLTAGE_MID = 12.6;
-    private static final double FLYWHEEL_VOLTAGE_LOW = 12.3;
-    private static final double FLYWHEEL_POWER_HIGH = 0.55;
-    private static final double FLYWHEEL_POWER_MID = 0.6;
-    private static final double FLYWHEEL_POWER_LOW = 0.65;
 
     @Override
     public void runOpMode() {
@@ -224,16 +209,16 @@ public class BiobuzzTeleop extends LinearOpMode {
         }
         prevDpadRight = gamepad2.dpad_right;
 
-        double launcherCap = flywheelPowerForVoltage(readBatteryVoltage());
+        double launcherCap = BiobuzzMechanisms.flywheelPowerForVoltage(readBatteryVoltage());
         laucherPower = launcherCap * joystickExponentialCurve(deadzone(gamepad2.right_stick_y));
         intakePower = joystickExponentialCurve(deadzone(gamepad2.left_stick_y));
 
         boolean gateForward = gamepad2.dpad_up;
         boolean gateBack = gamepad2.dpad_down;
         if (gateForward && !gateBack) {
-            gatePower = GATE_POWER;
+            gatePower = BiobuzzMechanisms.GATE_POWER;
         } else if (gateBack && !gateForward) {
-            gatePower = -GATE_POWER;
+            gatePower = -BiobuzzMechanisms.GATE_POWER;
         } else {
             gatePower = 0.0;
         }
@@ -241,39 +226,17 @@ public class BiobuzzTeleop extends LinearOpMode {
         boolean retractHeld = gamepad2.left_bumper;
         boolean deployHeld = gamepad2.right_bumper;
         if (retractHeld && !deployHeld) {
-            javelinPower = JAVELIN_POWER;
+            javelinPower = BiobuzzMechanisms.JAVELIN_POWER;
         } else if (deployHeld && !retractHeld) {
-            javelinPower = -JAVELIN_POWER;
+            javelinPower = -BiobuzzMechanisms.JAVELIN_POWER;
         } else {
             javelinPower = 0.0;
         }
     }
 
     private double readBatteryVoltage() {
-        double voltage = Double.POSITIVE_INFINITY;
-        for (VoltageSensor sensor : hardwareMap.voltageSensor) {
-            double reading = sensor.getVoltage();
-            if (reading > 0) {
-                voltage = Math.min(voltage, reading);
-            }
-        }
-        batteryVoltage = voltage == Double.POSITIVE_INFINITY ? FLYWHEEL_VOLTAGE_HIGH : voltage;
+        batteryVoltage = BiobuzzMechanisms.readBatteryVoltage(hardwareMap);
         return batteryVoltage;
-    }
-
-    private double flywheelPowerForVoltage(double voltage) {
-        if (voltage >= FLYWHEEL_VOLTAGE_HIGH) {
-            return FLYWHEEL_POWER_HIGH;
-        }
-        if (voltage >= FLYWHEEL_VOLTAGE_MID) {
-            return FLYWHEEL_POWER_MID;
-        }
-        if (voltage <= FLYWHEEL_VOLTAGE_LOW) {
-            return FLYWHEEL_POWER_LOW;
-        }
-        double span = FLYWHEEL_VOLTAGE_MID - FLYWHEEL_VOLTAGE_LOW;
-        double drop = (FLYWHEEL_VOLTAGE_MID - voltage) / span;
-        return FLYWHEEL_POWER_MID + drop * (FLYWHEEL_POWER_LOW - FLYWHEEL_POWER_MID);
     }
 
     private double deadzone(double gamepadInput) {
@@ -432,14 +395,14 @@ public class BiobuzzTeleop extends LinearOpMode {
     }
 
     private void updateIndicator() {
-        boolean robotMoving = Math.abs(drive) > MOVE_COMMAND
-                || Math.abs(strafe) > MOVE_COMMAND
-                || Math.abs(turn) > MOVE_COMMAND;
+        boolean robotMoving = Math.abs(drive) > BiobuzzMechanisms.MOVE_COMMAND
+                || Math.abs(strafe) > BiobuzzMechanisms.MOVE_COMMAND
+                || Math.abs(turn) > BiobuzzMechanisms.MOVE_COMMAND;
         double ticksPerSec = readLauncherTicksPerSec();
         indicator.update(
                 robotMoving,
-                Math.abs(intakePower) > MOVE_COMMAND,
-                ticksPerSec >= LAUNCHER_MOVE_TICKS_PER_SEC,
+                Math.abs(intakePower) > BiobuzzMechanisms.MOVE_COMMAND,
+                ticksPerSec >= BiobuzzMechanisms.LAUNCHER_MOVE_TICKS_PER_SEC,
                 defenseMode,
                 holdingPosition,
                 fighting,
@@ -461,21 +424,8 @@ public class BiobuzzTeleop extends LinearOpMode {
      * holds that speed, which is the wheel at the speed this power produces.
      */
     private boolean launcherAtShootSpeed(double ticksPerSec) {
-        double cap = flywheelPowerForVoltage(batteryVoltage);
-        boolean atCap = cap > 0.0 && Math.abs(laucherPower) >= cap * LAUNCHER_READY_FRACTION;
-        if (!atCap) {
-            launcherPeakTicksPerSec = 0.0;
-            launcherPeakMs = 0L;
-            return false;
-        }
-        long now = System.currentTimeMillis();
-        if (ticksPerSec > launcherPeakTicksPerSec * 1.02) {
-            launcherPeakTicksPerSec = ticksPerSec;
-            launcherPeakMs = now;
-        }
-        return launcherPeakTicksPerSec >= LAUNCHER_MIN_TICKS_PER_SEC
-                && ticksPerSec >= launcherPeakTicksPerSec * LAUNCHER_SPEED_HOLD
-                && now - launcherPeakMs >= LAUNCHER_SETTLE_MS;
+        double cap = BiobuzzMechanisms.flywheelPowerForVoltage(batteryVoltage);
+        return launcherSpeed.atShootSpeed(laucherPower, cap, ticksPerSec);
     }
 
     private void stopActuators() {
@@ -542,9 +492,9 @@ public class BiobuzzTeleop extends LinearOpMode {
         }
         telemetry.addData("Laucher", "%.2f power  %.0f ticks/s", laucherPower, launcherTicksPerSec);
         if (gatePower > 0.0) {
-            telemetry.addData("Gate", "forward %.2f", GATE_POWER);
+            telemetry.addData("Gate", "forward %.2f", BiobuzzMechanisms.GATE_POWER);
         } else if (gatePower < 0.0) {
-            telemetry.addData("Gate", "back %.2f", GATE_POWER);
+            telemetry.addData("Gate", "back %.2f", BiobuzzMechanisms.GATE_POWER);
         } else {
             telemetry.addData("Gate", "stopped");
         }

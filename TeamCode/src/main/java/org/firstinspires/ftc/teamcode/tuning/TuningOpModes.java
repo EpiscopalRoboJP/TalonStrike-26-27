@@ -40,6 +40,8 @@ import com.qualcomm.robotcore.hardware.DcMotorSimple;
 
 import org.firstinspires.ftc.robotcore.external.navigation.UnnormalizedAngleUnit;
 import org.firstinspires.ftc.robotcore.internal.opmode.OpModeMeta;
+import org.firstinspires.ftc.teamcode.AutoProfile;
+import org.firstinspires.ftc.teamcode.AutoTuningStore;
 import org.firstinspires.ftc.teamcode.MecanumDrive;
 import org.firstinspires.ftc.teamcode.OTOSLocalizer;
 import org.firstinspires.ftc.teamcode.PinpointLocalizer;
@@ -125,6 +127,7 @@ public final class TuningOpModes {
 
     @OpModeRegistrar
     public static void register(OpModeManager manager) {
+        AutoTuningStore.loadOnce();
         if (DISABLED) return;
 
         DriveViewFactory dvf;
@@ -309,6 +312,7 @@ public final class TuningOpModes {
 
         FtcDashboard.getInstance().withConfigRoot(configRoot -> {
             for (Class<?> c : Arrays.asList(
+                    AutoProfile.class,
                     AngularRampLogger.class,
                     ForwardRampLogger.class,
                     LateralRampLogger.class,

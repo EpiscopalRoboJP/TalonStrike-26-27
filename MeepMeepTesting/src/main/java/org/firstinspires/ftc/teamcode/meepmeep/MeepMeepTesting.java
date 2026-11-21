@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode.meepmeep;
 
+import com.acmerobotics.roadrunner.Action;
 import com.acmerobotics.roadrunner.Pose2d;
 import com.noahbres.meepmeep.MeepMeep;
 import com.noahbres.meepmeep.roadrunner.DefaultBotBuilder;
@@ -13,7 +14,8 @@ import java.io.IOException;
 import javax.imageio.ImageIO;
 
 /**
- * Desktop preview of BiobuzzAuto. Run with {@code gradlew :MeepMeepTesting:run}.
+ * Desktop preview of the autonomous routes. Run with {@code gradlew :MeepMeepTesting:run}.
+ * That draws the pollen cycle. Pass {@code park} to draw BiobuzzAuto instead.
  *
  * Constraints and the route come from AutoProfile, which MecanumDrive also uses.
  * MeepMeep brakes at {@code -maxAccel}. The robot's min accel is
@@ -21,6 +23,9 @@ import javax.imageio.ImageIO;
  * than the one drawn here.
  */
 public final class MeepMeepTesting {
+    // Pass "park" to draw BiobuzzAuto. Anything else draws the pollen cycle.
+    private static final boolean PREVIEW_POLLEN_CYCLE = true;
+
     private MeepMeepTesting() {
     }
 
@@ -41,7 +46,18 @@ public final class MeepMeepTesting {
                         AutoProfile.TRACK_WIDTH_IN)
                 .build();
 
-        bot.runAction(AutoProfile.buildAuto(bot.getDrive().actionBuilder(start), start));
+        boolean pollen = PREVIEW_POLLEN_CYCLE;
+        for (String arg : args) {
+            if ("park".equals(arg)) {
+                pollen = false;
+            } else if ("pollen".equals(arg)) {
+                pollen = true;
+            }
+        }
+        Action route = pollen
+                ? AutoProfile.buildPollenCycleAuto(bot.getDrive().actionBuilder(start), start)
+                : AutoProfile.buildAuto(bot.getDrive().actionBuilder(start), start);
+        bot.runAction(route);
 
         meepMeep.setBackground(loadBiobuzzField())
                 .setBackgroundAlpha(1.0f)

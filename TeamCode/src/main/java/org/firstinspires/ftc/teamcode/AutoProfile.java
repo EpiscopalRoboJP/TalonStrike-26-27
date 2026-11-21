@@ -16,6 +16,11 @@ import com.acmerobotics.roadrunner.Vector2d;
  * Red starts against the audience wall, facing it. The route backs up
  * 0.5 tile, shoots toward the audience, strafes 1.25 tiles toward the red
  * wall, backs up 3 tiles, then strafes 0.1 tile into the red loading zone.
+ *
+ * The pollen cycle shoots that preload, then sweeps tile A1 along the
+ * audience wall. The intake is on the back, half a robot wide, so the
+ * robot turns to +90 deg and bumps the wall at stations spaced within
+ * that width. It then returns to the shoot pose and parks as above.
  */
 public final class AutoProfile {
     private AutoProfile() {
@@ -38,11 +43,32 @@ public final class AutoProfile {
             -HALF_FIELD_IN + ROBOT_IN / 2.0,
             -Math.PI / 2.0);
 
-    public static final double SPINUP_SECONDS = 1.5;
-    public static final double FEED_PULSE_SECONDS = 0.4;
-    public static final double INTAKE_INDEX_SECONDS = 0.6;
-    public static final double BETWEEN_SHOTS_SECONDS = 0.2;
-    public static final int SHOT_COUNT = 4;
+    // Route offsets exposed in FTC Dashboard via TuningOpModes.
+    // Robot frame: +forward is along heading (toward audience at start),
+    // +left is 90 deg CCW (toward blue wall at start; negative is toward red wall).
+    public static double SHOOT_FORWARD_TILES = -0.5;
+    public static double SHOOT_LEFT_TILES = 0.0;
+    public static double SHOOT_HEADING_OFFSET_DEG = 0.0;
+    public static double TUCK_FORWARD_IN = -0.4;
+    public static double TUCK_LEFT_TILES = -1.25;
+    public static double PARK_FORWARD_TILES = -3.0;
+    public static double FULL_PARK_LEFT_TILES = -0.1;
+
+    public static double SPINUP_SECONDS = 1.5;
+    public static double FEED_PULSE_SECONDS = 0.4;
+    public static double INTAKE_INDEX_SECONDS = 0.6;
+    public static double BETWEEN_SHOTS_SECONDS = 0.2;
+    public static int SHOT_COUNT = 4;
+
+    // Back-facing intake is half the robot. A1's audience wall is y = -72.
+    public static final double INTAKE_WIDTH_IN = ROBOT_IN / 2.0;
+    public static final double SWEEP_HEADING = Math.PI / 2.0;
+    public static final double WALL_CONTACT_Y = -HALF_FIELD_IN + ROBOT_IN / 2.0;
+    public static final double SWEEP_CLEARANCE_IN = 9.0;
+    public static final double SWEEP_STANDOFF_Y = WALL_CONTACT_Y + SWEEP_CLEARANCE_IN;
+    public static final double A1_MIN_CENTER_X = -HALF_FIELD_IN + ROBOT_IN / 2.0;
+    public static final double A1_MAX_CENTER_X = -HALF_FIELD_IN + TILE_IN - INTAKE_WIDTH_IN / 2.0;
+    public static double BUMP_HOLD_SECONDS = 0.35;
 
     // Road Runner refuses a profile whose length is 0.
     public static final double MIN_TURN_RAD = Math.toRadians(0.5);
@@ -51,7 +77,7 @@ public final class AutoProfile {
     public static double shootSeconds() {
         return SPINUP_SECONDS
                 + SHOT_COUNT * FEED_PULSE_SECONDS
-                + (SHOT_COUNT - 1) * (INTAKE_INDEX_SECONDS + BETWEEN_SHOTS_SECONDS);
+                + Math.max(0, SHOT_COUNT - 1) * (INTAKE_INDEX_SECONDS + BETWEEN_SHOTS_SECONDS);
     }
 
     public static Pose2d shootPose() {
@@ -71,19 +97,25 @@ public final class AutoProfile {
     }
 
     public static Pose2d shootPose(Pose2d start) {
-        return offset(start, -0.5 * TILE_IN, 0.0);
+        Pose2d shifted = offset(start, SHOOT_FORWARD_TILES * TILE_IN, SHOOT_LEFT_TILES * TILE_IN);
+        return new Pose2d(
+                shifted.position.x,
+                shifted.position.y,
+                wrap(shifted.heading.toDouble() + Math.toRadians(SHOOT_HEADING_OFFSET_DEG)));
     }
 
     public static Pose2d afterLeftPose(Pose2d start) {
-        return offset(shootPose(start), -0.4, -1.25 * TILE_IN);
+        Pose2d shootPosWithStartHeading = offset(
+                start, SHOOT_FORWARD_TILES * TILE_IN, SHOOT_LEFT_TILES * TILE_IN);
+        return offset(shootPosWithStartHeading, TUCK_FORWARD_IN, TUCK_LEFT_TILES * TILE_IN);
     }
 
     public static Pose2d parkPose(Pose2d start) {
-        return offset(afterLeftPose(start), -3.0 * TILE_IN, 0.0);
+        return offset(afterLeftPose(start), PARK_FORWARD_TILES * TILE_IN, 0.0);
     }
 
     public static Pose2d fullParkPose(Pose2d start) {
-        return offset(parkPose(start), 0.0, -0.1 * TILE_IN);
+        return offset(parkPose(start), 0.0, FULL_PARK_LEFT_TILES * TILE_IN);
     }
 
     /**
@@ -98,6 +130,67 @@ public final class AutoProfile {
         Pose2d fullPark = fullParkPose(start);
         builder = append(builder, start, shoot.position, shoot.heading.toDouble());
         builder = builder.waitSeconds(shootSeconds());
+        builder = append(builder, shoot, tucked.position, tucked.heading.toDouble());
+        builder = append(builder, tucked, park.position, park.heading.toDouble());
+        builder = append(builder, park, fullPark.position, fullPark.heading.toDouble());
+        return builder.build();
+    }
+
+    /**
+     * Centers along A1's audience wall, from the blue side of the tile toward
+     * the red wall. Step is at most {@link #INTAKE_WIDTH_IN}, so a half-width
+     * intake covers the reachable line with overlap.
+     */
+    public static double[] sweepStationXs() {
+        double span = A1_MAX_CENTER_X - A1_MIN_CENTER_X;
+        if (span <= MIN_MOVE_IN) {
+            return new double[] { A1_MAX_CENTER_X };
+        }
+        int gaps = (int) Math.ceil(span / INTAKE_WIDTH_IN - 1e-9);
+        if (gaps < 1) {
+            gaps = 1;
+        }
+        double step = span / gaps;
+        double[] xs = new double[gaps + 1];
+        for (int i = 0; i <= gaps; i++) {
+            xs[i] = A1_MAX_CENTER_X - step * i;
+        }
+        return xs;
+    }
+
+    public static Pose2d sweepStandoffPose(double stationX) {
+        return new Pose2d(stationX, SWEEP_STANDOFF_Y, SWEEP_HEADING);
+    }
+
+    public static Pose2d sweepWallPose(double stationX) {
+        return new Pose2d(stationX, WALL_CONTACT_Y, SWEEP_HEADING);
+    }
+
+    /**
+     * Shoot the preload, bump along A1's audience wall, shoot again, then park.
+     * The builder must already be started at {@code start}. The open-loop press
+     * at the wall is the wait here; the robot applies the backup power itself.
+     */
+    public static Action buildPollenCycleAuto(TrajectoryActionBuilder builder, Pose2d start) {
+        Pose2d shoot = shootPose(start);
+        builder = append(builder, start, shoot.position, shoot.heading.toDouble());
+        builder = builder.waitSeconds(shootSeconds());
+        Pose2d cursor = shoot;
+        double[] stations = sweepStationXs();
+        for (int i = 0; i < stations.length; i++) {
+            Pose2d standoff = sweepStandoffPose(stations[i]);
+            Pose2d wall = sweepWallPose(stations[i]);
+            builder = append(builder, cursor, standoff.position, standoff.heading.toDouble());
+            builder = append(builder, standoff, wall.position, wall.heading.toDouble());
+            builder = builder.waitSeconds(Math.max(0.0, BUMP_HOLD_SECONDS));
+            builder = append(builder, wall, standoff.position, standoff.heading.toDouble());
+            cursor = standoff;
+        }
+        builder = append(builder, cursor, shoot.position, shoot.heading.toDouble());
+        builder = builder.waitSeconds(shootSeconds());
+        Pose2d tucked = afterLeftPose(start);
+        Pose2d park = parkPose(start);
+        Pose2d fullPark = fullParkPose(start);
         builder = append(builder, shoot, tucked.position, tucked.heading.toDouble());
         builder = append(builder, tucked, park.position, park.heading.toDouble());
         builder = append(builder, park, fullPark.position, fullPark.heading.toDouble());
